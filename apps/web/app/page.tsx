@@ -22,6 +22,7 @@ export default function Home() {
   return (
     <div className={styles.page}>
       <main className={styles.main}>
+        <Button appName="web" className="bg-red-600" children="Button" />
         <ThemeImage
           className={styles.logo}
           srcLight="turborepo-dark.svg"

@@ -18,7 +18,7 @@ body {
 
 body {
   color: var(--foreground);
-  background: var(--background);
+  background: var(--clbackground);
 }
 
 * {
