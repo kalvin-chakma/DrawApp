@@ -13,5 +13,5 @@ app.use("/room", roomRouter);
 app.use("/chat", chatRouter);
 
 app.listen(4000, () => {
-  console.log("Server started on port 3000");
+  console.log("Server started on port 4000");
 });
