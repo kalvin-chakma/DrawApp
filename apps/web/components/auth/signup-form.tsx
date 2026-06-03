@@ -1,32 +1,104 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
-import {
-  Eye,
-  EyeOff,
-  Mail,
-  Lock,
-  User,
-  Github,
-  Chrome,
-  Check,
-} from "lucide-react";
+import { Eye, EyeOff, Mail, Lock, User, Github, Chrome } from "lucide-react";
 import Link from "next/link";
+import { signup } from "../../services/api";
 
 export function SignUpForm() {
+  const router = useRouter();
+
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [agreedToTerms, setAgreedToTerms] = useState(false);
+
+  const [form, setForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const rules = [
+    { rule: /(?=.*[a-z])(?=.*[A-Z])/, label: "Upper & lowercase required" },
+    { rule: /.{7,}/, label: "Min 7 characters required" },
+    { rule: /(?=.*\d)/, label: "At least 1 number required" },
+  ];
+
+  const isPasswordValid = rules.every((r) => r.rule.test(form.password));
+
+  const handleChange = (field: string, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => setIsLoading(false), 2000);
+    setError("");
+    setSuccess("");
+
+    const { name, email, password, confirmPassword } = form;
+
+    if (!name || !email || !password || !confirmPassword) {
+      setError("Please fill in all the fields");
+      setIsLoading(false);
+      return;
+    }
+
+    if (!isPasswordValid) {
+      setError("Please ensure password meets requirements");
+      setIsLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await signup({
+        username: email,
+        name,
+        password,
+      });
+
+      if (response.status !== 200) {
+        throw new Error("Signup failed");
+      }
+
+      setSuccess("Account created successfully");
+
+      setForm({
+        name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+      });
+
+      router.push("/signin");
+    } catch (err: unknown) {
+      if (typeof err === "object" && err !== null && "response" in err) {
+        const errorObj = err as any;
+        setError(
+          errorObj.response?.data?.message ||
+            "Something went wrong. Please try again.",
+        );
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -40,151 +112,127 @@ export function SignUpForm() {
         </p>
       </div>
 
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {success && <p className="text-sm text-green-600">{success}</p>}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <div className="space-y-2">
-            <Label htmlFor="name" className="text-sm font-medium text-gray-700">
-              Full name
-            </Label>
-            <div className="relative">
-              <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="name"
-                type="text"
-                placeholder="Enter your full name"
-                className="pl-10 h-12 border-gray-200 focus:border-none focus:ring-none"
-                required
-              />
-            </div>
+          <Label htmlFor="name">Full name</Label>
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              id="name"
+              type="text"
+              value={form.name}
+              autoComplete="name"
+              onChange={(e) => handleChange("name", e.target.value)}
+              placeholder="Enter your full name"
+              className="pl-10 h-12"
+              required
+            />
           </div>
 
-          <div className="space-y-2">
-            <Label
-              htmlFor="email"
-              className="text-sm font-medium text-gray-700"
-            >
-              Email address
-            </Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="email"
-                type="email"
-                placeholder="Enter your email"
-                className="pl-10 h-12 border-gray-200 focus:border-none focus:ring-none"
-                required
-              />
-            </div>
+          <Label htmlFor="email">Email address</Label>
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={form.email}
+              onChange={(e) => handleChange("email", e.target.value)}
+              placeholder="Enter your email"
+              className="pl-10 h-12"
+              required
+            />
           </div>
 
-          <div className="space-y-2">
-            <Label
-              htmlFor="password"
-              className="text-sm font-medium text-gray-700"
+          <Label htmlFor="password">Password</Label>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              id="password"
+              autoComplete="new-password"
+              type={showPassword ? "text" : "password"}
+              value={form.password}
+              onChange={(e) => handleChange("password", e.target.value)}
+              placeholder="Create a password"
+              className="pl-10 pr-10 h-12"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
             >
-              Password
-            </Label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                placeholder="Create a password"
-                className="pl-10 pr-10 h-12 border-gray-200 focus:border-none focus:ring-none"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? (
-                  <EyeOff className="w-4 h-4" />
-                ) : (
-                  <Eye className="w-4 h-4" />
-                )}
-              </button>
-            </div>
+              {showPassword ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+            </button>
           </div>
 
-          <div className="space-y-2">
-            <Label
-              htmlFor="confirmPassword"
-              className="text-sm font-medium text-gray-700"
+          <Label htmlFor="confirmPassword">Confirm password</Label>
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Input
+              id="confirmPassword"
+              autoComplete="new-password"
+              type={showConfirmPassword ? "text" : "password"}
+              value={form.confirmPassword}
+              onChange={(e) => handleChange("confirmPassword", e.target.value)}
+              placeholder="Confirm your password"
+              className="pl-10 pr-10 h-12"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword((prev) => !prev)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400"
             >
-              Confirm password
-            </Label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-              <Input
-                id="confirmPassword"
-                type={showConfirmPassword ? "text" : "password"}
-                placeholder="Confirm your password"
-                className="pl-10 pr-10 h-12 border-gray-200 focus:border-none focus:ring-none"
-                required
-              />
-              <button
-                type="button"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showConfirmPassword ? (
-                  <EyeOff className="w-4 h-4" />
-                ) : (
-                  <Eye className="w-4 h-4" />
-                )}
-              </button>
-            </div>
+              {showConfirmPassword ? (
+                <EyeOff className="w-4 h-4" />
+              ) : (
+                <Eye className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
 
-        {/* <div className="flex items-start space-x-3">
-          <div className="flex items-center h-5">
-            <button
-              type="button"
-              onClick={() => setAgreedToTerms(!agreedToTerms)}
-              className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-all duration-200 ${
-                agreedToTerms
-                  ? "bg-green-600 border-green-600"
-                  : "border-gray-300 hover:border-green-400"
-              }`}
-            >
-              {agreedToTerms && <Check className="w-3 h-3 text-white" />}
-            </button>
-          </div>
-          <div className="text-sm leading-5">
-            <span className="text-gray-700">
-              I agree to the{" "}
-              <Link
-                href="/terms"
-                className="text-teal-600 hover:text-teal-500 font-medium"
-              >
-                Terms of Service
-              </Link>{" "}
-              and{" "}
-              <Link
-                href="/privacy"
-                className="text-teal-600 hover:text-teal-500 font-medium"
-              >
-                Privacy Policy
-              </Link>
-            </span>
-          </div>
-        </div> */}
+        <div className="space-y-1 text-sm ml-2">
+          {rules.map(({ rule, label }, i) => {
+            const valid = rule.test(form.password);
+            return (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    valid ? "bg-green-600" : "bg-gray-600"
+                  }`}
+                />
+                <span className={valid ? "text-green-600" : "text-gray-600"}>
+                  {label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
 
         <Button
           type="submit"
-          className="w-full h-12 bg-gradient-to-r  from-green-500 via-green-700 to-teal-800 hover:from-green-600 hover:via-green-700 hover:to-teal-700 text-white font-medium rounded-lg transition-all duration-200 transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-          disabled={isLoading || agreedToTerms}
+          className="w-full h-12 bg-gradient-to-r from-green-500 via-green-700 to-teal-800 text-white font-medium rounded-lg hover:scale-[1.02] transition-all duration-200"
+          disabled={
+            isLoading ||
+            !isPasswordValid ||
+            form.password !== form.confirmPassword
+          }
         >
           {isLoading ? "Creating account..." : "Create account"}
         </Button>
       </form>
 
-      <div className="relative">
-        <div className="relative flex justify-center text-sm">
-          <span className="px-2 bg-white text-gray-500">Or continue with</span>
-        </div>
+      <div className="relative text-sm text-center text-gray-500">
+        <span className="px-2 bg-white">Or continue with</span>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -192,15 +240,13 @@ export function SignUpForm() {
           variant="fam"
           className="h-12 border border-gray-400 hover:bg-gray-50"
         >
-          <Github className="w-5 h-5 mr-2" />
-          GitHub
+          <Github className="w-5 h-5 mr-2" /> GitHub
         </Button>
         <Button
           variant="fam"
           className="h-12 border border-gray-400 hover:bg-gray-50"
         >
-          <Chrome className="w-5 h-5 mr-2" />
-          Google
+          <Chrome className="w-5 h-5 mr-2" /> Google
         </Button>
       </div>
 
@@ -208,7 +254,7 @@ export function SignUpForm() {
         Already have an account?{" "}
         <Link
           href="/signin"
-          className="font-medium text-teal-600 hover:text-teal-800"
+          className="text-teal-600 hover:text-teal-800 font-medium"
         >
           Sign in
         </Link>

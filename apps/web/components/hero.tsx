@@ -2,8 +2,11 @@
 
 import { Button } from "@repo/ui/components/button";
 import { ArrowRight, Sparkles, Users, Zap } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export function Hero() {
+  const router = useRouter();
+
   return (
     <section className="relative min-h-screen w-screen flex items-center justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-teal-50 to-green-50">
       {/* Background decorations */}
@@ -44,6 +47,7 @@ export function Hero() {
             <Button
               variant="gradient"
               className="group transition-all duration-300"
+              onClick={() => router.push("/draw")}
             >
               Start Drawing Free
               <ArrowRight className="ml-2 w-5 h-5 group-hover:translate-x-1 transition-transform" />

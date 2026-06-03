@@ -4,19 +4,41 @@ import { useState } from "react";
 import { Button } from "@repo/ui/components/button";
 import { Input } from "@repo/ui/components/input";
 import { Label } from "@repo/ui/components/label";
-
 import { Eye, EyeOff, Mail, Lock, Github, Chrome } from "lucide-react";
 import Link from "next/link";
+import { signin } from "../../services/api";
+import { useRouter } from "next/navigation";
 
 export function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const Router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => setIsLoading(false), 2000);
+    setError("");
+
+    if (!email || !password) {
+      setError("Please fill in all the fields");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const response = await signin({
+        username: email,
+        password,
+      });
+      localStorage.setItem("token", response.data.token);
+      Router.push("/create-room");
+    } catch (error: any) {
+      setError(error?.response?.data?.message || "Something went wrong");
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -44,6 +66,9 @@ export function SignInForm() {
               <Input
                 id="email"
                 type="email"
+                value={email}
+                autoComplete="email"
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email"
                 className="pl-10 h-12 border-gray-200 focus:border-none focus:ring-none"
                 required
@@ -62,6 +87,9 @@ export function SignInForm() {
               <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
               <Input
                 id="password"
+                value={password}
+                autoComplete="current-password"
+                onChange={(e) => setPassword(e.target.value)}
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 className="pl-10 pr-10 h-12 border-gray-200 focus:border-none focus:ring-none"

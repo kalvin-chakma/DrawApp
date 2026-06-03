@@ -18,6 +18,9 @@ export function Appbar() {
   const handleSignIn = () => {
     router.push("/signin");
   };
+  const handleSignUp = () => {
+    router.push("/signup");
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-lg border-b border-gray-200/50">
@@ -55,7 +58,11 @@ export function Appbar() {
             >
               Sign In
             </Button>
-            <Button variant="gradient" className="shadow-lg hover:shadow-xl">
+            <Button
+              variant="gradient"
+              className="shadow-lg hover:shadow-xl"
+              onClick={handleSignUp}
+            >
               Get Started
             </Button>
           </div>
@@ -80,7 +87,7 @@ export function Appbar() {
         <div
           className={cn(
             "md:hidden overflow-hidden transition-all duration-300 ease-in-out",
-            mobileMenuOpen ? "max-h-64 opacity-100 pb-4" : "max-h-0 opacity-0"
+            mobileMenuOpen ? "max-h-64 opacity-100 pb-4" : "max-h-0 opacity-0",
           )}
         >
           <div className="space-y-4 pt-4 border-t border-gray-200">
