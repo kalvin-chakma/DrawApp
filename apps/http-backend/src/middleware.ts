@@ -10,8 +10,12 @@ export const middleware = (req: AuthenticatedRequest, res: Response, next: NextF
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ message: "Unauthorized" });
 
+  const token = authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : authHeader;
+
   try {
-    const decoded = jwt.verify(authHeader, JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
     req.userId = decoded.userId;
     next();
   } catch (e) {

@@ -23,6 +23,32 @@ roomRouter.post("/", middleware, async (req: AuthenticatedRequest, res) => {
   }
 });
 
+roomRouter.get("/user/rooms", middleware, async (req: AuthenticatedRequest, res) => {
+  const userId = req.userId!;
+  try {
+    const rooms = await db.room.findMany({
+      where: { adminId: userId },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json({ rooms });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch rooms" });
+  }
+});
+
+roomRouter.get("/stats", middleware, async (req: AuthenticatedRequest, res) => {
+  const userId = req.userId!;
+  try {
+    const [totalRooms, totalNotes] = await Promise.all([
+      db.room.count({ where: { adminId: userId } }),
+      db.chat.count({ where: { userId } }),
+    ]);
+    res.json({ totalRooms, totalNotes });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch stats" });
+  }
+});
+
 roomRouter.get("/:slug", async (req, res) => {
   const room = await db.room.findUnique({
     where: { slug: req.params.slug },

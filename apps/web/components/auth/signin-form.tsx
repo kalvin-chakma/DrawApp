@@ -34,7 +34,7 @@ export function SignInForm() {
         password,
       });
       localStorage.setItem("token", response.data.token);
-      Router.push("/create-room");
+      Router.push("/dashboard");
     } catch (error: any) {
       setError(error?.response?.data?.message || "Something went wrong");
       setIsLoading(false);

@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import { CreateUserSchema, SigninSchema } from "@repo/common/types";
 import { JWT_SECRET } from "@repo/common/env-variable";
+import { AuthenticatedRequest, middleware } from "../middleware";
 
 const authRouter: Router = express.Router();
 
@@ -48,6 +49,25 @@ authRouter.post("/signin", async (req, res) => {
   }
   const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: "7d" });
   res.json({ token });
+});
+
+authRouter.get("/me", middleware, async (req: AuthenticatedRequest, res) => {
+  const userId = req.userId!;
+
+  try {
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: "Failed to fetch user" });
+  }
 });
 
 export default authRouter;

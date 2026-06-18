@@ -24,3 +24,15 @@ export const signup = (credentials: {
   name: string;
   password: string;
 }) => apiClient.post("/auth/signup", credentials);
+
+export const getCurrentUser = () => apiClient.get("/auth/me");
+
+// Room APIs
+export const createRoom = (data: { name: string }) =>
+  apiClient.post("/room", data);
+
+export const getUserRooms = () => apiClient.get("/room/user/rooms");
+
+export const getDashboardStats = () => apiClient.get("/room/stats");
+
+export const getRoomBySlug = (slug: string) => apiClient.get(`/room/${slug}`);
