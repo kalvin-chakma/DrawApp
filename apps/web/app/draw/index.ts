@@ -16,7 +16,8 @@ interface Point {
 export function initDraw(
   canvas: HTMLCanvasElement,
   roomId: string,
-  socket?: WebSocket | null
+  socket?: WebSocket | null,
+  options?: { color?: string; lineWidth?: number },
 ): () => void {
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -32,8 +33,8 @@ export function initDraw(
   let lastPoint: Point | null = null;
 
   // Drawing settings
-  const color = "#000000";
-  const lineWidth = 2;
+  const color = options?.color ?? "#1e1e1e";
+  const lineWidth = options?.lineWidth ?? 2;
 
   // Set up canvas context
   ctx.lineCap = "round";
@@ -56,7 +57,7 @@ export function initDraw(
     from: Point,
     to: Point,
     strokeColor = color,
-    strokeWidth = lineWidth
+    strokeWidth = lineWidth,
   ) {
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = strokeWidth;
@@ -153,7 +154,7 @@ export function initDraw(
           otherUserLastPoint,
           currentPoint,
           data.color || "#ff0000",
-          data.lineWidth || 2
+          data.lineWidth || 2,
         );
         otherUserLastPoint = currentPoint;
       } else if (data.type === "draw_end" && data.roomId === roomId) {

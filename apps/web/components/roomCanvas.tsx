@@ -1,137 +1,317 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import {
+  MousePointer2,
+  Pencil,
+  Square,
+  Circle,
+  Minus,
+  Type,
+  Eraser,
+  ArrowLeft,
+  Share2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { Canvas } from "./canvas";
+import { cn } from "@repo/ui/lib/utils";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
 
+type Tool =
+  | "select"
+  | "pencil"
+  | "rect"
+  | "circle"
+  | "line"
+  | "text"
+  | "eraser";
+
+interface ToolDef {
+  id: Tool;
+  icon: React.ElementType;
+  label: string;
+  shortcut: string;
+  ready: boolean;
+}
+
+const TOOLS: ToolDef[] = [
+  {
+    id: "select",
+    icon: MousePointer2,
+    label: "Select",
+    shortcut: "V",
+    ready: false,
+  },
+  { id: "pencil", icon: Pencil, label: "Pencil", shortcut: "P", ready: true },
+  { id: "rect", icon: Square, label: "Rectangle", shortcut: "R", ready: false },
+  { id: "circle", icon: Circle, label: "Ellipse", shortcut: "O", ready: false },
+  { id: "line", icon: Minus, label: "Line", shortcut: "L", ready: false },
+  { id: "text", icon: Type, label: "Text", shortcut: "T", ready: false },
+  { id: "eraser", icon: Eraser, label: "Eraser", shortcut: "E", ready: false },
+];
+
+const COLORS = [
+  "#1e1e1e",
+  "#e03131",
+  "#2f9e44",
+  "#1971c2",
+  "#f08c00",
+  "#ae3ec9",
+];
+
+const STROKE_WIDTHS = [
+  { value: 1.5, label: "Thin" },
+  { value: 3, label: "Medium" },
+  { value: 6, label: "Thick" },
+];
+
 export function RoomCanvas({
   roomId,
+  roomSlug,
   token,
 }: {
   roomId: string;
+  roomSlug: string;
   token: string;
 }) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<
+  const [status, setStatus] = useState<
     "connecting" | "connected" | "error" | "closed"
   >("connecting");
+  const [selectedTool, setSelectedTool] = useState<Tool>("pencil");
+  const [strokeColor, setStrokeColor] = useState(COLORS[0]!);
+  const [strokeWidth, setStrokeWidth] = useState(STROKE_WIDTHS[1]!.value);
+  const [zoom, setZoom] = useState(100);
+  const [copied, setCopied] = useState(false);
+  const router = useRouter();
 
+  // WebSocket setup
   useEffect(() => {
     if (!token || !roomId) return;
-
     const ws = new WebSocket(`${WS_URL}?token=${token}`);
 
     ws.onopen = () => {
-      console.log("WebSocket connected");
-      setConnectionStatus("connected");
+      setStatus("connected");
       setSocket(ws);
-
-      // Join the room
-      const joinMessage = JSON.stringify({
-        type: "join_room",
-        roomId,
-      });
-
-      console.log("Joining room:", joinMessage);
-      ws.send(joinMessage);
+      ws.send(JSON.stringify({ type: "join_room", roomId }));
     };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
-      setConnectionStatus("error");
+    ws.onerror = () => {
+      setStatus("error");
+      setSocket(null);
+    };
+    ws.onclose = () => {
+      setStatus("closed");
       setSocket(null);
     };
 
-    ws.onclose = (event) => {
-      console.log("WebSocket connection closed:", event.code, event.reason);
-      setConnectionStatus("closed");
-      setSocket(null);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        console.log("Received message:", data);
-
-        // Handle different message types if needed
-        if (data.type === "chat") {
-          console.log("Chat message received:", data.message);
-        }
-      } catch (error) {
-        console.error("Error parsing WebSocket message:", error);
-      }
-    };
-
-    // Cleanup function
     return () => {
       if (ws.readyState === WebSocket.OPEN) {
-        // Leave room before closing
-        ws.send(
-          JSON.stringify({
-            type: "leave_room",
-            roomId,
-          })
-        );
+        ws.send(JSON.stringify({ type: "leave_room", roomId }));
       }
       ws.close();
     };
   }, [roomId, token]);
 
-  const getStatusDisplay = () => {
-    switch (connectionStatus) {
-      case "connecting":
-        return (
-          <div className="flex items-center justify-center p-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mr-3"></div>
-            <span className="text-gray-600">Connecting to server...</span>
-          </div>
-        );
-      case "error":
-        return (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-            <p className="font-bold">Connection Error</p>
-            <p>
-              Failed to connect to the drawing server. Please check your
-              connection and try again.
-            </p>
-          </div>
-        );
-      case "closed":
-        return (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded">
-            <p className="font-bold">Connection Closed</p>
-            <p>
-              Connection to the drawing server has been closed. Please refresh
-              the page to reconnect.
-            </p>
-          </div>
-        );
-      default:
-        return null;
-    }
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      )
+        return;
+      const tool = TOOLS.find(
+        (t) => t.shortcut.toLowerCase() === e.key.toLowerCase() && t.ready,
+      );
+      if (tool) setSelectedTool(tool.id);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const handleShare = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  if (!socket || connectionStatus !== "connected") {
-    return (
-      <div className="min-h-96 flex items-center justify-center">
-        {getStatusDisplay()}
-      </div>
-    );
-  }
+  const statusConfig = {
+    connecting: { dot: "bg-yellow-400 animate-pulse", label: "Connecting" },
+    connected: { dot: "bg-emerald-500", label: "Live" },
+    error: { dot: "bg-red-500", label: "Error" },
+    closed: { dot: "bg-gray-400", label: "Offline" },
+  } as const;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-          <span className="text-sm text-gray-600">
-            Connected to room {roomId}
+    <div className="fixed inset-0 overflow-hidden select-none">
+      {/* ── Canvas ─────────────────────────────────────── */}
+      <Canvas
+        roomId={roomId}
+        socket={socket}
+        selectedTool={selectedTool}
+        strokeColor={strokeColor}
+        strokeWidth={strokeWidth}
+      />
+
+      {/* ── Top Bar ────────────────────────────────────── */}
+      <header className="absolute top-3 left-0 right-0 flex items-center justify-between px-3 pointer-events-none z-10">
+        {/* Left: back */}
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="pointer-events-auto flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          Dashboard
+        </button>
+
+        {/* Center: room name */}
+        <div className="pointer-events-auto h-9 px-4 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-800 max-w-[180px] truncate">
+            {roomSlug}
           </span>
+        </div>
+
+        {/* Right: status + share */}
+        <div className="pointer-events-auto flex items-center gap-2">
+          <div className="h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
+            <span
+              className={cn(
+                "w-2 h-2 rounded-full flex-shrink-0",
+                statusConfig[status].dot,
+              )}
+            />
+            <span className="text-xs font-medium text-gray-600">
+              {statusConfig[status].label}
+            </span>
+          </div>
+
+          <button
+            onClick={handleShare}
+            className="flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            {copied ? "Copied!" : "Share"}
+          </button>
+        </div>
+      </header>
+
+      {/* ── Bottom Center Toolbar ───────────────────────── */}
+      <div className="absolute bottom-6 left-0 right-0 flex justify-center z-10 pointer-events-none">
+        <div className="pointer-events-auto flex items-center gap-0.5 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg shadow-black/10 border border-gray-200/80 px-2 py-2">
+          {/* Tools */}
+          {TOOLS.map((tool, idx) => {
+            const Icon = tool.icon;
+            const isActive = selectedTool === tool.id;
+            const showSep = idx === 1; // separator after pencil group
+            return (
+              <div key={tool.id} className="flex items-center">
+                {showSep && <div className="w-px h-5 bg-gray-200 mx-1.5" />}
+                <div className="relative group">
+                  <button
+                    onClick={() => tool.ready && setSelectedTool(tool.id)}
+                    disabled={!tool.ready}
+                    className={cn(
+                      "w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-150",
+                      isActive
+                        ? "bg-gray-900 text-white shadow-sm scale-105"
+                        : tool.ready
+                          ? "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          : "text-gray-300 cursor-not-allowed",
+                    )}
+                  >
+                    <Icon size={17} />
+                  </button>
+                  {/* Tooltip */}
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                    {tool.label}
+                    {!tool.ready && " · soon"}
+                    <span className="ml-1.5 opacity-50">{tool.shortcut}</span>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1.5" />
+
+          {/* Stroke widths */}
+          <div className="flex items-center gap-1.5 px-1">
+            {STROKE_WIDTHS.map((sw) => (
+              <div key={sw.value} className="relative group">
+                <button
+                  onClick={() => setStrokeWidth(sw.value)}
+                  className={cn(
+                    "w-9 h-9 rounded-xl flex items-center justify-center transition-all",
+                    strokeWidth === sw.value
+                      ? "bg-gray-100"
+                      : "hover:bg-gray-100",
+                  )}
+                >
+                  <div
+                    className="rounded-full bg-gray-800"
+                    style={{ width: sw.value * 2.5, height: sw.value * 2.5 }}
+                  />
+                </button>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  {sw.label}
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1.5" />
+
+          {/* Color swatches */}
+          <div className="flex items-center gap-1.5 px-1">
+            {COLORS.map((color) => (
+              <div key={color} className="relative group">
+                <button
+                  onClick={() => setStrokeColor(color)}
+                  className={cn(
+                    "w-6 h-6 rounded-full transition-all duration-150 hover:scale-110",
+                    strokeColor === color
+                      ? "ring-2 ring-offset-2 ring-gray-400 scale-110"
+                      : "",
+                  )}
+                  style={{ backgroundColor: color }}
+                />
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  {color}
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <Canvas roomId={roomId} socket={socket} />
+      {/* ── Zoom Controls (bottom-right) ────────────────── */}
+      <div className="absolute bottom-6 right-4 z-10">
+        <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 p-1">
+          <button
+            onClick={() => setZoom((z) => Math.max(25, z - 10))}
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ZoomOut size={13} />
+          </button>
+          <span className="text-xs font-medium text-gray-600 w-11 text-center tabular-nums">
+            {zoom}%
+          </span>
+          <button
+            onClick={() => setZoom((z) => Math.min(400, z + 10))}
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ZoomIn size={13} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

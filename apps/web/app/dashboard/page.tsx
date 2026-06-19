@@ -21,6 +21,7 @@ import {
   StatCardSkeleton,
 } from "../../components/dashboard/stat-card";
 import { JoinRoomModal } from "../../components/dashboard/join-room-modal";
+import { CreateRoomModal } from "../../components/dashboard/create-room-model";
 import { Button } from "@repo/ui/components/button";
 
 interface Stats {
@@ -43,6 +44,7 @@ export default function DashboardPage() {
   const [statsError, setStatsError] = useState("");
   const [roomsError, setRoomsError] = useState("");
   const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
   const [username, setUsername] = useState("");
   const router = useRouter();
 
@@ -138,7 +140,7 @@ export default function DashboardPage() {
             variant="gradient"
             icon="Plus"
             className="px-4 py-2.5 text-sm font-medium"
-            onClick={() => router.push("/create-room")}
+            onClick={() => setCreateModalOpen(true)}
           >
             New Room
           </Button>
@@ -234,7 +236,7 @@ export default function DashboardPage() {
               variant="gradient"
               icon="Plus"
               className="px-4 py-2 rounded-lg text-xs font-medium"
-              onClick={() => router.push("/create-room")}
+              onClick={() => setCreateModalOpen(true)}
             >
               Create a Room
             </Button>
@@ -279,7 +281,7 @@ export default function DashboardPage() {
             icon={Plus}
             label="Create Room"
             description="Start a new collaborative canvas"
-            onClick={() => router.push("/create-room")}
+            onClick={() => setCreateModalOpen(true)}
             color="slate"
           />
           <QuickActionCard
@@ -292,10 +294,14 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* Modal */}
+      {/* Modals */}
       <JoinRoomModal
         open={joinModalOpen}
         onClose={() => setJoinModalOpen(false)}
+      />
+      <CreateRoomModal
+        open={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
       />
     </div>
   );

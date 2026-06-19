@@ -3,25 +3,28 @@
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { RoomCanvas } from "../../../components/roomCanvas";
+import { getRoomBySlug } from "../../../services/api";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+interface Room {
+  id: number;
+  slug: string;
+  adminId: string;
+  createdAt: string;
+}
 
 export default function RoomPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  const [room, setRoom] = useState<any>(null);
+  const { slug } = use(params);
+  const [room, setRoom] = useState<Room | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [token, setToken] = useState<string | null>(null);
   const router = useRouter();
 
-  // Unwrap the params Promise using React.use()
-  const { slug } = use(params);
-
   useEffect(() => {
-    // Check for token
     const storedToken = localStorage.getItem("token");
     if (!storedToken) {
       router.push("/signin");
@@ -29,84 +32,52 @@ export default function RoomPage({
     }
     setToken(storedToken);
 
-    // Fetch room details
-    fetchRoom();
+    getRoomBySlug(slug)
+      .then((res) => setRoom(res.data))
+      .catch((err) => {
+        if (err?.response?.status === 401) {
+          router.push("/signin");
+        } else {
+          setError(err?.response?.data?.message || "Room not found");
+        }
+      })
+      .finally(() => setLoading(false));
   }, [slug, router]);
-
-  const fetchRoom = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/room/${slug}`);
-      const data = await response.json();
-
-      if (response.ok) {
-        setRoom(data);
-      } else {
-        setError(data.message || "Room not found");
-      }
-    } catch (err) {
-      setError("Failed to fetch room details");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-lg">Loading room...</div>
+      <div className="fixed inset-0 flex items-center justify-center">
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/80 px-8 py-6 flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-t-gray-800 border-gray-200 rounded-full animate-spin" />
+          <p className="text-sm font-medium text-gray-700">Loading room…</p>
+        </div>
       </div>
     );
   }
 
-  if (error || !room) {
+  if (error || !room || !token) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="bg-white p-8 rounded-lg shadow-md text-center">
-          <div className="text-red-600 mb-4">{error}</div>
+      <div className="fixed inset-0 flex items-center justify-center">
+        <div className="bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-200/80 px-8 py-6 flex flex-col items-center gap-4 max-w-sm w-full mx-4 text-center">
+          <p className="text-sm font-semibold text-gray-800">
+            {error || "Something went wrong"}
+          </p>
           <button
-            onClick={() => router.push("/create-room")}
-            className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600"
+            onClick={() => router.push("/dashboard")}
+            className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-xl hover:bg-gray-700 transition-colors"
           >
-            Back to Room Management
+            Back to Dashboard
           </button>
         </div>
       </div>
     );
   }
 
-  if (!token) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div>Please sign in to access this room</div>
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-gray-100">
-      <header className="bg-white shadow-sm border-b p-4">
-        <div className="container mx-auto flex justify-between items-center">
-          <div>
-            <h1 className="text-xl font-bold">Room: {room.slug}</h1>
-            <p className="text-sm text-gray-600">Room ID: {room.id}</p>
-          </div>
-          <div className="flex gap-4">
-            <button
-              onClick={() => router.push("/create-room")}
-              className="bg-gray-500 text-white py-2 px-4 rounded-md hover:bg-gray-600"
-            >
-              Leave Room
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="container mx-auto p-4">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-lg font-semibold mb-4">Collaborative Canvas</h2>
-          <RoomCanvas roomId={room.id.toString()} token={token} />
-        </div>
-      </main>
-    </div>
+    <RoomCanvas
+      roomId={room.id.toString()}
+      roomSlug={room.slug}
+      token={token}
+    />
   );
 }

@@ -1,42 +1,53 @@
-// components/canvas.tsx
+"use client";
+
 import { initDraw } from "../app/draw";
 import { useEffect, useRef } from "react";
 
 export function Canvas({
   roomId,
   socket,
+  selectedTool,
+  strokeColor,
+  strokeWidth,
 }: {
-  socket?: WebSocket | null;
   roomId: string;
+  socket?: WebSocket | null;
+  selectedTool: string;
+  strokeColor: string;
+  strokeWidth: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (canvasRef.current) {
-      const cleanup = initDraw(canvasRef.current, roomId, socket);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }, []);
 
-      return cleanup; // Return cleanup function
-    }
-  }, [canvasRef, roomId, socket]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    if (selectedTool !== "pencil") return;
+    const cleanup = initDraw(canvas, roomId, socket, {
+      color: strokeColor,
+      lineWidth: strokeWidth,
+    });
+    return cleanup;
+  }, [roomId, socket, selectedTool, strokeColor, strokeWidth]);
+
+  const cursor =
+    selectedTool === "pencil"
+      ? "crosshair"
+      : selectedTool === "eraser"
+        ? "cell"
+        : "default";
 
   return (
-    <div className="flex flex-col items-center">
-      <div className="mb-4">
-        <p className="text-sm text-gray-600">
-          Use your mouse to draw on the canvas. Changes are synced in real-time.
-        </p>
-      </div>
-      <div className="border-2 border-gray-300 rounded-lg overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          width={800}
-          height={600}
-          className="bg-white cursor-crosshair"
-        />
-      </div>
-      <div className="mt-4 text-xs text-gray-500">
-        {socket ? `Connected to room: ${roomId}` : `Free drawing (local)`}
-      </div>
-    </div>
+    <canvas
+      ref={canvasRef}
+      className="absolute inset-0 w-full h-full touch-none"
+      style={{ cursor }}
+    />
   );
 }
