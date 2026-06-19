@@ -1,4 +1,5 @@
 // lib/draw.ts
+
 interface DrawEvent {
   type: "draw_start" | "draw_move" | "draw_end";
   roomId: string;
@@ -13,69 +14,144 @@ interface Point {
   y: number;
 }
 
+interface Stroke {
+  points: Point[];
+  color: string;
+  lineWidth: number;
+}
+
+interface ViewTransform {
+  tx: number;
+  ty: number;
+  scale: number;
+}
+
+// A plain mutable ref — no React dependency needed at runtime.
+interface Ref<T> {
+  current: T;
+}
+
 export function initDraw(
   canvas: HTMLCanvasElement,
   roomId: string,
-  socket?: WebSocket | null,
-  options?: { color?: string; lineWidth?: number },
-): () => void {
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
+  socket: WebSocket | null | undefined,
+  selectedToolRef: Ref<string>,
+  colorRef: Ref<string>,
+  lineWidthRef: Ref<number>,
+  viewTransformRef: Ref<ViewTransform>,
+): { cleanup: () => void; redraw: () => void } {
+  const maybeCtx = canvas.getContext("2d");
+  if (!maybeCtx) {
     console.error("Failed to get 2D context from canvas");
-    return () => {};
+    return { cleanup: () => {}, redraw: () => {} };
   }
+  // Assign to a non-nullable const so TypeScript preserves the type inside closures.
+  const ctx: CanvasRenderingContext2D = maybeCtx;
 
-  const canSend = () => {
-    return Boolean(socket && socket.readyState === WebSocket.OPEN);
-  };
+  // All strokes stored in world-space coordinates.
+  const strokes: Stroke[] = [];
+  let currentStroke: Stroke | null = null;
+  let otherUserCurrentStroke: Stroke | null = null;
 
-  let isDrawing = false;
-  let lastPoint: Point | null = null;
-
-  // Drawing settings
-  const color = options?.color ?? "#1e1e1e";
-  const lineWidth = options?.lineWidth ?? 2;
-
-  // Set up canvas context
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth;
 
-  // Get canvas position for accurate mouse coordinates
-  function getMousePos(e: MouseEvent): Point {
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    };
+  // ── Coordinate helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Apply the current view transform to the 2D context so that all subsequent
+   * draw calls operate in world space.
+   */
+  function applyTransform(): void {
+    const { tx, ty, scale } = viewTransformRef.current;
+    ctx.setTransform(scale, 0, 0, scale, tx, ty);
   }
 
-  // Draw line function
-  function drawLine(
-    ctx: CanvasRenderingContext2D, // Pass ctx as a parameter
+  /**
+   * Convert a screen (viewport) coordinate to a world coordinate using the
+   * inverse of the current view transform.
+   */
+  function screenToWorld(sx: number, sy: number): Point {
+    const { tx, ty, scale } = viewTransformRef.current;
+    return { x: (sx - tx) / scale, y: (sy - ty) / scale };
+  }
+
+  /**
+   * Get the current mouse position in world coordinates.
+   * The canvas covers the full viewport at (0,0) with no CSS transform, so
+   * clientX/clientY map directly to screen pixels.
+   */
+  function getMousePos(e: MouseEvent): Point {
+    return screenToWorld(e.clientX, e.clientY);
+  }
+
+  // ── Full redraw ─────────────────────────────────────────────────────────────
+
+  /**
+   * Clear the canvas and repaint all stored strokes using the current view
+   * transform.  Called whenever the view changes (pan / zoom).
+   */
+  function redraw(): void {
+    // Reset to identity so clearRect covers the whole canvas buffer.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    applyTransform();
+
+    for (const stroke of strokes) {
+      if (stroke.points.length < 2) continue;
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.lineWidth;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0]!.x, stroke.points[0]!.y);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // ── Incremental draw helper ─────────────────────────────────────────────────
+
+  function drawSegment(
     from: Point,
     to: Point,
-    strokeColor = color,
-    strokeWidth = lineWidth,
-  ) {
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = strokeWidth;
+    color: string,
+    lineWidth: number,
+  ): void {
+    applyTransform();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
     ctx.beginPath();
     ctx.moveTo(from.x, from.y);
     ctx.lineTo(to.x, to.y);
     ctx.stroke();
   }
 
-  // Mouse down event
-  function handleMouseDown(e: MouseEvent) {
+  // ── Mouse handlers ──────────────────────────────────────────────────────────
+
+  let isDrawing = false;
+  let lastPoint: Point | null = null;
+
+  function handleMouseDown(e: MouseEvent): void {
+    if (selectedToolRef.current !== "pencil") return;
+
     isDrawing = true;
     const point = getMousePos(e);
     lastPoint = point;
 
-    // Send draw start event (when websocket is enabled)
-    if (canSend()) {
-      const drawEvent: DrawEvent = {
+    const color = colorRef.current;
+    const lineWidth = lineWidthRef.current;
+
+    currentStroke = { points: [point], color, lineWidth };
+    strokes.push(currentStroke);
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const event: DrawEvent = {
         type: "draw_start",
         roomId,
         x: point.x,
@@ -83,132 +159,137 @@ export function initDraw(
         color,
         lineWidth,
       };
-
-      socket!.send(JSON.stringify(drawEvent));
+      socket.send(JSON.stringify(event));
     }
   }
 
-  // Mouse move event
-  function handleMouseMove(e: MouseEvent) {
-    if (!isDrawing || !lastPoint) return;
+  function handleMouseMove(e: MouseEvent): void {
+    if (!isDrawing || !lastPoint || !currentStroke) return;
 
-    const currentPoint = getMousePos(e);
+    const point = getMousePos(e);
+    currentStroke.points.push(point);
 
-    // Draw locally
-    drawLine(ctx as CanvasRenderingContext2D, lastPoint, currentPoint); // Pass ctx
+    // Draw only the new segment for smooth real-time performance.
+    drawSegment(lastPoint, point, currentStroke.color, currentStroke.lineWidth);
 
-    // Send draw move event (when websocket is enabled)
-    if (canSend()) {
-      const drawEvent: DrawEvent = {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const event: DrawEvent = {
         type: "draw_move",
         roomId,
-        x: currentPoint.x,
-        y: currentPoint.y,
+        x: point.x,
+        y: point.y,
       };
-
-      socket!.send(JSON.stringify(drawEvent));
+      socket.send(JSON.stringify(event));
     }
 
-    lastPoint = currentPoint;
+    lastPoint = point;
   }
 
-  // Mouse up event
-  function handleMouseUp(e: MouseEvent) {
+  function handleMouseUp(e: MouseEvent): void {
     if (!isDrawing) return;
 
     isDrawing = false;
+    currentStroke = null;
     const point = getMousePos(e);
+    lastPoint = null;
 
-    // Send draw end event (when websocket is enabled)
-    if (canSend()) {
-      const drawEvent: DrawEvent = {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const event: DrawEvent = {
         type: "draw_end",
         roomId,
         x: point.x,
         y: point.y,
       };
-
-      socket!.send(JSON.stringify(drawEvent));
+      socket.send(JSON.stringify(event));
     }
-
-    lastPoint = null;
   }
 
-  // Handle incoming draw events from other users
-  let otherUserLastPoint: Point | null = null;
+  // ── WebSocket handler ───────────────────────────────────────────────────────
 
-  function handleWebSocketMessage(event: MessageEvent) {
+  function handleWebSocketMessage(event: MessageEvent): void {
     try {
-      const data = JSON.parse(event.data);
+      const data = JSON.parse(event.data) as DrawEvent & { roomId: string };
 
       if (data.type === "draw_start" && data.roomId === roomId) {
-        otherUserLastPoint = { x: data.x, y: data.y };
+        const pt = { x: data.x, y: data.y };
+        otherUserCurrentStroke = {
+          points: [pt],
+          color: data.color ?? "#ff0000",
+          lineWidth: data.lineWidth ?? 2,
+        };
+        strokes.push(otherUserCurrentStroke);
       } else if (
         data.type === "draw_move" &&
         data.roomId === roomId &&
-        otherUserLastPoint
+        otherUserCurrentStroke
       ) {
-        const currentPoint = { x: data.x, y: data.y };
-        drawLine(
-          ctx as CanvasRenderingContext2D,
-          otherUserLastPoint,
-          currentPoint,
-          data.color || "#ff0000",
-          data.lineWidth || 2,
+        const prev =
+          otherUserCurrentStroke.points[
+            otherUserCurrentStroke.points.length - 1
+          ]!;
+        const cur = { x: data.x, y: data.y };
+        otherUserCurrentStroke.points.push(cur);
+        drawSegment(
+          prev,
+          cur,
+          otherUserCurrentStroke.color,
+          otherUserCurrentStroke.lineWidth,
         );
-        otherUserLastPoint = currentPoint;
       } else if (data.type === "draw_end" && data.roomId === roomId) {
-        otherUserLastPoint = null;
+        otherUserCurrentStroke = null;
       }
-    } catch (error) {
-      console.error("Error parsing WebSocket message:", error);
+    } catch (err) {
+      console.error("Error parsing WebSocket message:", err);
     }
   }
 
-  // Add event listeners
+  // ── Touch event forwarding ──────────────────────────────────────────────────
+
+  function handleTouchStart(e: TouchEvent): void {
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    canvas.dispatchEvent(
+      new MouseEvent("mousedown", {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+      }),
+    );
+  }
+
+  function handleTouchMove(e: TouchEvent): void {
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    canvas.dispatchEvent(
+      new MouseEvent("mousemove", {
+        clientX: touch.clientX,
+        clientY: touch.clientY,
+      }),
+    );
+  }
+
+  function handleTouchEnd(e: TouchEvent): void {
+    e.preventDefault();
+    canvas.dispatchEvent(new MouseEvent("mouseup", {}));
+  }
+
+  // ── Register listeners ──────────────────────────────────────────────────────
+
   canvas.addEventListener("mousedown", handleMouseDown);
   canvas.addEventListener("mousemove", handleMouseMove);
   canvas.addEventListener("mouseup", handleMouseUp);
-  canvas.addEventListener("mouseout", handleMouseUp); // Stop drawing when mouse leaves canvas
+  canvas.addEventListener("mouseout", handleMouseUp);
+  canvas.addEventListener("touchstart", handleTouchStart);
+  canvas.addEventListener("touchmove", handleTouchMove);
+  canvas.addEventListener("touchend", handleTouchEnd);
   if (socket) {
     socket.addEventListener("message", handleWebSocketMessage);
   }
 
-  // Touch events for mobile support
-  function handleTouchStart(e: TouchEvent) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    if (!touch) return; // Check if touch exists
-    const mouseEvent = new MouseEvent("mousedown", {
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-    });
-    canvas.dispatchEvent(mouseEvent);
-  }
+  // ── Cleanup ─────────────────────────────────────────────────────────────────
 
-  function handleTouchMove(e: TouchEvent) {
-    e.preventDefault();
-    const touch = e.touches[0];
-    if (!touch) return; // Check if touch exists
-    const mouseEvent = new MouseEvent("mousemove", {
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-    });
-    canvas.dispatchEvent(mouseEvent);
-  }
-
-  function handleTouchEnd(e: TouchEvent) {
-    e.preventDefault();
-    const mouseEvent = new MouseEvent("mouseup", {});
-    canvas.dispatchEvent(mouseEvent);
-  }
-
-  canvas.addEventListener("touchstart", handleTouchStart);
-  canvas.addEventListener("touchmove", handleTouchMove);
-  canvas.addEventListener("touchend", handleTouchEnd);
-
-  // Return cleanup function
-  return () => {
+  function cleanup(): void {
     canvas.removeEventListener("mousedown", handleMouseDown);
     canvas.removeEventListener("mousemove", handleMouseMove);
     canvas.removeEventListener("mouseup", handleMouseUp);
@@ -219,5 +300,7 @@ export function initDraw(
     if (socket) {
       socket.removeEventListener("message", handleWebSocketMessage);
     }
-  };
+  }
+
+  return { cleanup, redraw };
 }

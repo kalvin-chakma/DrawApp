@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   MousePointer2,
@@ -15,7 +15,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { Canvas } from "./canvas";
+import { Canvas, type ViewTransform } from "./canvas";
 import { cn } from "@repo/ui/lib/utils";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
@@ -43,7 +43,7 @@ const TOOLS: ToolDef[] = [
     icon: MousePointer2,
     label: "Select",
     shortcut: "V",
-    ready: false,
+    ready: true,
   },
   { id: "pencil", icon: Pencil, label: "Pencil", shortcut: "P", ready: true },
   { id: "rect", icon: Square, label: "Rectangle", shortcut: "R", ready: false },
@@ -84,15 +84,22 @@ export function RoomCanvas({
   const [selectedTool, setSelectedTool] = useState<Tool>("pencil");
   const [strokeColor, setStrokeColor] = useState(COLORS[0]!);
   const [strokeWidth, setStrokeWidth] = useState(STROKE_WIDTHS[1]!.value);
-  const [zoom, setZoom] = useState(100);
+  const [viewTransform, setViewTransform] = useState<ViewTransform>({
+    tx: 0,
+    ty: 0,
+    scale: 1,
+  });
+  const [isPanning, setIsPanning] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const lastPanRef = useRef({ x: 0, y: 0 });
   const router = useRouter();
 
-  // WebSocket setup
+  // ── WebSocket ────────────────────────────────────────────
   useEffect(() => {
     if (!token || !roomId) return;
     const ws = new WebSocket(`${WS_URL}?token=${token}`);
-
     ws.onopen = () => {
       setStatus("connected");
       setSocket(ws);
@@ -106,16 +113,14 @@ export function RoomCanvas({
       setStatus("closed");
       setSocket(null);
     };
-
     return () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws.readyState === WebSocket.OPEN)
         ws.send(JSON.stringify({ type: "leave_room", roomId }));
-      }
       ws.close();
     };
   }, [roomId, token]);
 
-  // Keyboard shortcuts
+  // ── Keyboard shortcuts ───────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (
@@ -132,6 +137,65 @@ export function RoomCanvas({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // ── Wheel zoom — centered on cursor ─────────────────────
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.08 : 0.93;
+      setViewTransform((prev) => {
+        const newScale = Math.max(0.1, Math.min(8, prev.scale * factor));
+        const ratio = newScale / prev.scale;
+        return {
+          scale: newScale,
+          tx: e.clientX - (e.clientX - prev.tx) * ratio,
+          ty: e.clientY - (e.clientY - prev.ty) * ratio,
+        };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // ── Zoom helpers (buttons) — centered on viewport ────────
+  const applyZoom = useCallback((factor: number) => {
+    setViewTransform((prev) => {
+      const newScale = Math.max(0.1, Math.min(8, prev.scale * factor));
+      const ratio = newScale / prev.scale;
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      return {
+        scale: newScale,
+        tx: cx - (cx - prev.tx) * ratio,
+        ty: cy - (cy - prev.ty) * ratio,
+      };
+    });
+  }, []);
+
+  const resetZoom = useCallback(
+    () => setViewTransform({ tx: 0, ty: 0, scale: 1 }),
+    [],
+  );
+
+  // ── Pan handlers (select tool overlay) ──────────────────
+  const handlePanStart = (e: React.MouseEvent) => {
+    setIsPanning(true);
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+  };
+  const handlePanMove = (e: React.MouseEvent) => {
+    if (!isPanning) return;
+    const dx = e.clientX - lastPanRef.current.x;
+    const dy = e.clientY - lastPanRef.current.y;
+    lastPanRef.current = { x: e.clientX, y: e.clientY };
+    setViewTransform((prev) => ({
+      ...prev,
+      tx: prev.tx + dx,
+      ty: prev.ty + dy,
+    }));
+  };
+  const handlePanEnd = () => setIsPanning(false);
+
   const handleShare = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
@@ -146,7 +210,10 @@ export function RoomCanvas({
   } as const;
 
   return (
-    <div className="fixed inset-0 overflow-hidden select-none">
+    <div
+      ref={containerRef}
+      className="fixed inset-0 overflow-hidden select-none bg-white"
+    >
       {/* ── Canvas ─────────────────────────────────────── */}
       <Canvas
         roomId={roomId}
@@ -154,11 +221,23 @@ export function RoomCanvas({
         selectedTool={selectedTool}
         strokeColor={strokeColor}
         strokeWidth={strokeWidth}
+        viewTransform={viewTransform}
       />
+
+      {/* ── Pan overlay (only when select tool active) ──── */}
+      {selectedTool === "select" && (
+        <div
+          className="absolute inset-0 z-[5]"
+          style={{ cursor: isPanning ? "grabbing" : "grab" }}
+          onMouseDown={handlePanStart}
+          onMouseMove={handlePanMove}
+          onMouseUp={handlePanEnd}
+          onMouseLeave={handlePanEnd}
+        />
+      )}
 
       {/* ── Top Bar ────────────────────────────────────── */}
       <header className="absolute top-3 left-0 right-0 flex items-center justify-between px-3 pointer-events-none z-10">
-        {/* Left: back */}
         <button
           onClick={() => router.push("/dashboard")}
           className="pointer-events-auto flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors"
@@ -167,14 +246,12 @@ export function RoomCanvas({
           Dashboard
         </button>
 
-        {/* Center: room name */}
-        <div className="pointer-events-auto h-9 px-4 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
+        <div className="pointer-events-auto h-9 px-4 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center">
           <span className="text-sm font-semibold text-gray-800 max-w-[180px] truncate">
             {roomSlug}
           </span>
         </div>
 
-        {/* Right: status + share */}
         <div className="pointer-events-auto flex items-center gap-2">
           <div className="h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
             <span
@@ -187,7 +264,6 @@ export function RoomCanvas({
               {statusConfig[status].label}
             </span>
           </div>
-
           <button
             onClick={handleShare}
             className="flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors"
@@ -205,7 +281,7 @@ export function RoomCanvas({
           {TOOLS.map((tool, idx) => {
             const Icon = tool.icon;
             const isActive = selectedTool === tool.id;
-            const showSep = idx === 1; // separator after pencil group
+            const showSep = idx === 2; // separator before shape tools
             return (
               <div key={tool.id} className="flex items-center">
                 {showSep && <div className="w-px h-5 bg-gray-200 mx-1.5" />}
@@ -224,7 +300,6 @@ export function RoomCanvas({
                   >
                     <Icon size={17} />
                   </button>
-                  {/* Tooltip */}
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
                     {tool.label}
                     {!tool.ready && " · soon"}
@@ -236,7 +311,6 @@ export function RoomCanvas({
             );
           })}
 
-          {/* Separator */}
           <div className="w-px h-5 bg-gray-200 mx-1.5" />
 
           {/* Stroke widths */}
@@ -257,7 +331,10 @@ export function RoomCanvas({
                     style={{ width: sw.value * 2.5, height: sw.value * 2.5 }}
                   />
                 </button>
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                <div
+                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white
+ text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50"
+                >
                   {sw.label}
                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
                 </div>
@@ -265,7 +342,6 @@ export function RoomCanvas({
             ))}
           </div>
 
-          {/* Separator */}
           <div className="w-px h-5 bg-gray-200 mx-1.5" />
 
           {/* Color swatches */}
@@ -296,17 +372,23 @@ export function RoomCanvas({
       <div className="absolute bottom-6 right-4 z-10">
         <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 p-1">
           <button
-            onClick={() => setZoom((z) => Math.max(25, z - 10))}
+            onClick={() => applyZoom(0.95)}
             className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Zoom out"
           >
             <ZoomOut size={13} />
           </button>
-          <span className="text-xs font-medium text-gray-600 w-11 text-center tabular-nums">
-            {zoom}%
-          </span>
           <button
-            onClick={() => setZoom((z) => Math.min(400, z + 10))}
+            onClick={resetZoom}
+            title="Click to reset zoom"
+            className="text-xs font-medium text-gray-600 w-12 text-center tabular-nums hover:bg-gray-100 rounded-lg h-7 transition-colors"
+          >
+            {Math.round(viewTransform.scale * 100)}%
+          </button>
+          <button
+            onClick={() => applyZoom(1.05)}
             className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Zoom in"
           >
             <ZoomIn size={13} />
           </button>

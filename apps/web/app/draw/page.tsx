@@ -11,11 +11,7 @@ export default function DrawFreePage() {
   return (
     <div className="min-h-screen w-screen bg-gradient-to-br from-slate-50 via-teal-50 to-green-50 flex flex-col">
       <div className="p-4 flex items-center gap-3">
-        <Button
-          variant="fam"
-          className="h-11"
-          onClick={() => router.push("/")}
-        >
+        <Button variant="fam" className="h-11" onClick={() => router.push("/")}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back
         </Button>
@@ -23,9 +19,15 @@ export default function DrawFreePage() {
       </div>
 
       <div className="flex-1 flex items-center justify-center p-4">
-        <Canvas roomId="free" socket={null} />
+        <Canvas
+          roomId="free"
+          socket={null}
+          selectedTool="pencil"
+          strokeColor="#1e1e1e"
+          strokeWidth={2}
+          viewTransform={{ tx: 0, ty: 0, scale: 1 }}
+        />
       </div>
     </div>
   );
 }
-
