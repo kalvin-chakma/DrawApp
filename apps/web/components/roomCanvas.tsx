@@ -50,7 +50,7 @@ const TOOLS: ToolDef[] = [
   { id: "circle", icon: Circle, label: "Ellipse", shortcut: "O", ready: false },
   { id: "line", icon: Minus, label: "Line", shortcut: "L", ready: false },
   { id: "text", icon: Type, label: "Text", shortcut: "T", ready: false },
-  { id: "eraser", icon: Eraser, label: "Eraser", shortcut: "E", ready: false },
+  { id: "eraser", icon: Eraser, label: "Eraser", shortcut: "E", ready: true },
 ];
 
 const COLORS = [
@@ -66,6 +66,13 @@ const STROKE_WIDTHS = [
   { value: 1.5, label: "Thin" },
   { value: 3, label: "Medium" },
   { value: 6, label: "Thick" },
+];
+
+// Screen-pixel radii for the eraser (independent of stroke width)
+const ERASER_SIZES = [
+  { value: 10, label: "Small" },
+  { value: 22, label: "Medium" },
+  { value: 40, label: "Large" },
 ];
 
 export function RoomCanvas({
@@ -91,6 +98,10 @@ export function RoomCanvas({
   });
   const [isPanning, setIsPanning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [eraserSize, setEraserSize] = useState(ERASER_SIZES[1]!.value);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(
+    null,
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastPanRef = useRef({ x: 0, y: 0 });
@@ -179,6 +190,8 @@ export function RoomCanvas({
   );
 
   // ── Pan handlers (select tool overlay) ──────────────────
+  // `eraserSize` is already a screen-pixel radius — used directly for the cursor overlay.
+
   const handlePanStart = (e: React.MouseEvent) => {
     setIsPanning(true);
     lastPanRef.current = { x: e.clientX, y: e.clientY };
@@ -213,6 +226,8 @@ export function RoomCanvas({
     <div
       ref={containerRef}
       className="fixed inset-0 overflow-hidden select-none bg-white"
+      onMouseMove={(e) => setMousePos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setMousePos(null)}
     >
       {/* ── Canvas ─────────────────────────────────────── */}
       <Canvas
@@ -221,8 +236,22 @@ export function RoomCanvas({
         selectedTool={selectedTool}
         strokeColor={strokeColor}
         strokeWidth={strokeWidth}
+        eraserSize={eraserSize}
         viewTransform={viewTransform}
       />
+
+      {/* ── Eraser cursor overlay ──────────────────────── */}
+      {selectedTool === "eraser" && mousePos && (
+        <div
+          className="pointer-events-none fixed z-20 rounded-full border-2 border-gray-700 bg-white/10"
+          style={{
+            width: eraserSize * 2,
+            height: eraserSize * 2,
+            left: mousePos.x - eraserSize,
+            top: mousePos.y - eraserSize,
+          }}
+        />
+      )}
 
       {/* ── Pan overlay (only when select tool active) ──── */}
       {selectedTool === "select" && (
@@ -313,58 +342,88 @@ export function RoomCanvas({
 
           <div className="w-px h-5 bg-gray-200 mx-1.5" />
 
-          {/* Stroke widths */}
-          <div className="flex items-center gap-1.5 px-1">
-            {STROKE_WIDTHS.map((sw) => (
-              <div key={sw.value} className="relative group">
-                <button
-                  onClick={() => setStrokeWidth(sw.value)}
-                  className={cn(
-                    "w-9 h-9 rounded-xl flex items-center justify-center transition-all",
-                    strokeWidth === sw.value
-                      ? "bg-gray-100"
-                      : "hover:bg-gray-100",
-                  )}
-                >
-                  <div
-                    className="rounded-full bg-gray-800"
-                    style={{ width: sw.value * 2.5, height: sw.value * 2.5 }}
-                  />
-                </button>
-                <div
-                  className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white
- text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50"
-                >
-                  {sw.label}
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+          {selectedTool === "eraser" ? (
+            /* Eraser size picker */
+            <div className="flex items-center gap-1.5 px-1">
+              {ERASER_SIZES.map((es) => (
+                <div key={es.value} className="relative group">
+                  <button
+                    onClick={() => setEraserSize(es.value)}
+                    className={cn(
+                      "w-9 h-9 rounded-xl flex items-center justify-center transition-all",
+                      eraserSize === es.value
+                        ? "bg-gray-100"
+                        : "hover:bg-gray-100",
+                    )}
+                  >
+                    <div
+                      className="rounded-full border-2 border-gray-500"
+                      style={{ width: es.value * 0.9, height: es.value * 0.9 }}
+                    />
+                  </button>
+                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                    {es.label}
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                  </div>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {/* Stroke widths */}
+              <div className="flex items-center gap-1.5 px-1">
+                {STROKE_WIDTHS.map((sw) => (
+                  <div key={sw.value} className="relative group">
+                    <button
+                      onClick={() => setStrokeWidth(sw.value)}
+                      className={cn(
+                        "w-9 h-9 rounded-xl flex items-center justify-center transition-all",
+                        strokeWidth === sw.value
+                          ? "bg-gray-100"
+                          : "hover:bg-gray-100",
+                      )}
+                    >
+                      <div
+                        className="rounded-full bg-gray-800"
+                        style={{
+                          width: sw.value * 2.5,
+                          height: sw.value * 2.5,
+                        }}
+                      />
+                    </button>
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                      {sw.label}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
 
-          <div className="w-px h-5 bg-gray-200 mx-1.5" />
+              <div className="w-px h-5 bg-gray-200 mx-1.5" />
 
-          {/* Color swatches */}
-          <div className="flex items-center gap-1.5 px-1">
-            {COLORS.map((color) => (
-              <div key={color} className="relative group">
-                <button
-                  onClick={() => setStrokeColor(color)}
-                  className={cn(
-                    "w-6 h-6 rounded-full transition-all duration-150 hover:scale-110",
-                    strokeColor === color
-                      ? "ring-2 ring-offset-2 ring-gray-400 scale-110"
-                      : "",
-                  )}
-                  style={{ backgroundColor: color }}
-                />
-                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                  {color}
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
-                </div>
+              {/* Color swatches */}
+              <div className="flex items-center gap-1.5 px-1">
+                {COLORS.map((color) => (
+                  <div key={color} className="relative group">
+                    <button
+                      onClick={() => setStrokeColor(color)}
+                      className={cn(
+                        "w-6 h-6 rounded-full transition-all duration-150 hover:scale-110",
+                        strokeColor === color
+                          ? "ring-2 ring-offset-2 ring-gray-400 scale-110"
+                          : "",
+                      )}
+                      style={{ backgroundColor: color }}
+                    />
+                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                      {color}
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </div>
 

@@ -15,6 +15,7 @@ export function Canvas({
   selectedTool,
   strokeColor,
   strokeWidth,
+  eraserSize,
   viewTransform,
 }: {
   roomId: string;
@@ -22,6 +23,7 @@ export function Canvas({
   selectedTool: string;
   strokeColor: string;
   strokeWidth: number;
+  eraserSize: number;
   viewTransform: ViewTransform;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -32,6 +34,7 @@ export function Canvas({
   const strokeColorRef = useRef(strokeColor);
   const strokeWidthRef = useRef(strokeWidth);
   const selectedToolRef = useRef(selectedTool);
+  const eraserSizeRef = useRef(eraserSize);
 
   // Keep tool / style refs in sync with props.
   useEffect(() => {
@@ -43,6 +46,9 @@ export function Canvas({
   useEffect(() => {
     selectedToolRef.current = selectedTool;
   }, [selectedTool]);
+  useEffect(() => {
+    eraserSizeRef.current = eraserSize;
+  }, [eraserSize]);
 
   // redrawRef lets the viewTransform effect call the latest redraw function
   // without depending on the draw-init effect.
@@ -65,6 +71,7 @@ export function Canvas({
       strokeColorRef,
       strokeWidthRef,
       viewTransformRef,
+      eraserSizeRef,
     );
 
     redrawRef.current = redraw;
@@ -82,7 +89,7 @@ export function Canvas({
     selectedTool === "pencil"
       ? "crosshair"
       : selectedTool === "eraser"
-        ? "cell"
+        ? "none"
         : selectedTool === "select"
           ? "default"
           : "crosshair";
