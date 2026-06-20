@@ -25,6 +25,7 @@ export default function DrawFreePage() {
           selectedTool="pencil"
           strokeColor="#1e1e1e"
           strokeWidth={2}
+          eraserSize={22}
           viewTransform={{ tx: 0, ty: 0, scale: 1 }}
         />
       </div>
