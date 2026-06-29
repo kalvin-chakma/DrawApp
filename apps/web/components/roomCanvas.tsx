@@ -46,7 +46,7 @@ const TOOLS: ToolDef[] = [
     ready: true,
   },
   { id: "pencil", icon: Pencil, label: "Pencil", shortcut: "P", ready: true },
-  { id: "rect", icon: Square, label: "Rectangle", shortcut: "R", ready: false },
+  { id: "rect", icon: Square, label: "Rectangle", shortcut: "R", ready: true },
   { id: "circle", icon: Circle, label: "Ellipse", shortcut: "O", ready: false },
   { id: "line", icon: Minus, label: "Line", shortcut: "L", ready: false },
   { id: "text", icon: Type, label: "Text", shortcut: "T", ready: false },

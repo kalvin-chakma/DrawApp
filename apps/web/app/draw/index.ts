@@ -1,13 +1,14 @@
-// lib/draw.ts
-
 interface DrawEvent {
-  type: "draw_start" | "draw_move" | "draw_end" | "erase_partial";
+  type: "draw_start" | "draw_move" | "draw_end" | "erase_partial" | "rect_start" | "rect_move" | "rect_end";
   roomId: string;
   x: number;
   y: number;
   color?: string;
   lineWidth?: number;
   strokeId?: number;
+  // Rect fields
+  x2?: number;
+  y2?: number;
   // Partial-erase fields
   erasedId?: number;
   replacements?: Array<{
@@ -15,6 +16,7 @@ interface DrawEvent {
     points: Point[];
     color: string;
     lineWidth: number;
+    kind: "path";
   }>;
 }
 
@@ -23,12 +25,26 @@ interface Point {
   y: number;
 }
 
-interface Stroke {
+interface PathStroke {
   id: number;
+  kind: "path";
   points: Point[];
   color: string;
   lineWidth: number;
 }
+
+interface RectStroke {
+  id: number;
+  kind: "rect";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  lineWidth: number;
+}
+
+type Stroke = PathStroke | RectStroke;
 
 interface ViewTransform {
   tx: number;
@@ -36,7 +52,6 @@ interface ViewTransform {
   scale: number;
 }
 
-// A plain mutable ref — no React dependency needed at runtime.
 interface Ref<T> {
   current: T;
 }
@@ -56,15 +71,14 @@ export function initDraw(
     console.error("Failed to get 2D context from canvas");
     return { cleanup: () => {}, redraw: () => {} };
   }
-  // Assign to a non-nullable const so TypeScript preserves the type inside closures.
   const ctx: CanvasRenderingContext2D = maybeCtx;
 
-  // All strokes stored in world-space coordinates.
   const strokes: Stroke[] = [];
-  let currentStroke: Stroke | null = null;
-  let otherUserCurrentStroke: Stroke | null = null;
+  let currentStroke: PathStroke | null = null;
+  let currentRect: RectStroke | null = null;    // live rect being dragged
+  let otherUserCurrentStroke: PathStroke | null = null;
+  let otherUserCurrentRect: RectStroke | null = null;
 
-  // Random seed minimises cross-client ID collisions without a server round-trip.
   let nextStrokeId = Math.floor(Math.random() * 1e9);
 
   ctx.lineCap = "round";
@@ -72,48 +86,25 @@ export function initDraw(
 
   // ── Coordinate helpers ──────────────────────────────────────────────────────
 
-  /**
-   * Apply the current view transform to the 2D context so that all subsequent
-   * draw calls operate in world space.
-   */
   function applyTransform(): void {
     const { tx, ty, scale } = viewTransformRef.current;
     ctx.setTransform(scale, 0, 0, scale, tx, ty);
   }
 
-  /**
-   * Convert a screen (viewport) coordinate to a world coordinate using the
-   * inverse of the current view transform.
-   */
   function screenToWorld(sx: number, sy: number): Point {
     const { tx, ty, scale } = viewTransformRef.current;
     return { x: (sx - tx) / scale, y: (sy - ty) / scale };
   }
 
-  /**
-   * Get the current mouse position in world coordinates.
-   * The canvas covers the full viewport at (0,0) with no CSS transform, so
-   * clientX/clientY map directly to screen pixels.
-   */
   function getMousePos(e: MouseEvent): Point {
     return screenToWorld(e.clientX, e.clientY);
   }
 
-  // ── Full redraw ─────────────────────────────────────────────────────────────
+  // ── Stroke renderers ────────────────────────────────────────────────────────
 
-  /**
-   * Clear the canvas and repaint all stored strokes using the current view
-   * transform.  Called whenever the view changes (pan / zoom) or after erasing.
-   */
-  function redraw(): void {
-    // Reset to identity so clearRect covers the whole canvas buffer.
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    applyTransform();
-
-    for (const stroke of strokes) {
-      if (stroke.points.length < 2) continue;
+  function renderStroke(stroke: Stroke): void {
+    if (stroke.kind === "path") {
+      if (stroke.points.length < 2) return;
       ctx.strokeStyle = stroke.color;
       ctx.lineWidth = stroke.lineWidth;
       ctx.lineCap = "round";
@@ -124,10 +115,34 @@ export function initDraw(
         ctx.lineTo(stroke.points[i]!.x, stroke.points[i]!.y);
       }
       ctx.stroke();
+    } else {
+      // rect
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.lineWidth;
+      ctx.lineCap = "square";
+      ctx.lineJoin = "miter";
+      ctx.beginPath();
+      ctx.strokeRect(stroke.x, stroke.y, stroke.w, stroke.h);
     }
   }
 
-  // ── Incremental draw helper ─────────────────────────────────────────────────
+  // ── Full redraw ─────────────────────────────────────────────────────────────
+
+  function redraw(): void {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    applyTransform();
+
+    for (const stroke of strokes) {
+      renderStroke(stroke);
+    }
+
+    // Draw live rect preview on top
+    if (currentRect) renderStroke(currentRect);
+    if (otherUserCurrentRect) renderStroke(otherUserCurrentRect);
+  }
+
+  // ── Incremental draw helper (path only) ─────────────────────────────────────
 
   function drawSegment(
     from: Point,
@@ -148,24 +163,14 @@ export function initDraw(
 
   // ── Eraser geometry ─────────────────────────────────────────────────────────
 
-  /**
-   * The eraser radius in world-space.  `eraserSizeRef.current` is a
-   * screen-pixel radius so dividing by scale keeps the circle visually
-   * consistent at any zoom level.
-   */
   function getEraserWorldRadius(): number {
     return eraserSizeRef.current / viewTransformRef.current.scale;
   }
 
-  /** True when point p is strictly inside (or on the boundary of) the eraser circle. */
   function isInsideEraser(p: Point, center: Point, radius: number): boolean {
     return Math.hypot(p.x - center.x, p.y - center.y) <= radius;
   }
 
-  /**
-   * Find t-parameters in (0, 1) where the segment A→B crosses the eraser
-   * circle boundary.  Returns 0, 1, or 2 values in ascending order.
-   */
   function segmentCircleIntersections(
     a: Point,
     b: Point,
@@ -176,15 +181,12 @@ export function initDraw(
     const dy = b.y - a.y;
     const fx = a.x - center.x;
     const fy = a.y - center.y;
-
     const A = dx * dx + dy * dy;
-    if (A === 0) return []; // zero-length segment
-
+    if (A === 0) return [];
     const B = 2 * (fx * dx + fy * dy);
     const C = fx * fx + fy * fy - radius * radius;
     const disc = B * B - 4 * A * C;
     if (disc < 0) return [];
-
     const sqrtDisc = Math.sqrt(disc);
     const eps = 1e-9;
     const ts: number[] = [];
@@ -199,9 +201,6 @@ export function initDraw(
     return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
   }
 
-  /**
-   * Minimum distance from point p to segment A→B (used for initial hit check).
-   */
   function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -214,51 +213,50 @@ export function initDraw(
     return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
   }
 
-  /** Quick check — true if any part of the stroke is within the eraser circle. */
   function strokeIntersectsEraser(
     stroke: Stroke,
     center: Point,
     radius: number,
   ): boolean {
+    if (stroke.kind === "rect") {
+      // Treat rect as 4 segments for eraser hit detection
+      const { x, y, w, h } = stroke;
+      const corners: [Point, Point][] = [
+        [{ x, y }, { x: x + w, y }],
+        [{ x: x + w, y }, { x: x + w, y: y + h }],
+        [{ x: x + w, y: y + h }, { x, y: y + h }],
+        [{ x, y: y + h }, { x, y }],
+      ];
+      return corners.some(
+        ([a, b]) => pointToSegmentDistance(center, a!, b!) <= radius,
+      );
+    }
     const pts = stroke.points;
     if (pts.length === 0) return false;
-    if (pts.length === 1) {
-      return isInsideEraser(pts[0]!, center, radius);
-    }
+    if (pts.length === 1) return isInsideEraser(pts[0]!, center, radius);
     for (let i = 0; i < pts.length - 1; i++) {
-      if (pointToSegmentDistance(center, pts[i]!, pts[i + 1]!) <= radius) {
+      if (pointToSegmentDistance(center, pts[i]!, pts[i + 1]!) <= radius)
         return true;
-      }
     }
     return false;
   }
 
-  /**
-   * Split a stroke around the eraser circle.
-   *
-   * The algorithm walks every consecutive point pair (segment).  For each
-   * segment it determines which endpoint(s) are inside the circle and where
-   * the segment crosses the circle boundary, then builds the surviving
-   * sub-strokes from the outside portions.
-   *
-   * Returns an array of new Stroke objects (may be empty if the stroke was
-   * fully covered).
-   */
   function splitStrokeByEraser(
-    stroke: Stroke,
+    stroke: PathStroke,
     center: Point,
     radius: number,
-  ): Stroke[] {
+  ): PathStroke[] {
     const pts = stroke.points;
     if (pts.length === 0) return [];
 
-    const result: Stroke[] = [];
+    const result: PathStroke[] = [];
     let currentPoints: Point[] = [];
 
     function finishSubStroke(): void {
       if (currentPoints.length >= 2) {
         result.push({
           id: nextStrokeId++,
+          kind: "path",
           points: currentPoints,
           color: stroke.color,
           lineWidth: stroke.lineWidth,
@@ -267,7 +265,6 @@ export function initDraw(
       currentPoints = [];
     }
 
-    // Seed the first point if it starts outside the eraser.
     if (!isInsideEraser(pts[0]!, center, radius)) {
       currentPoints.push(pts[0]!);
     }
@@ -281,40 +278,24 @@ export function initDraw(
 
       if (!aIn && !bIn) {
         if (ts.length === 2) {
-          // Segment threads through the circle: outside → inside → outside.
-          // Cap the current sub-stroke at the entry point, then immediately
-          // start a new one from the exit point.
           currentPoints.push(lerp(a, b, ts[0]!));
           finishSubStroke();
           currentPoints.push(lerp(a, b, ts[1]!));
         }
-        // Whether or not it threaded, B is outside — add it.
         currentPoints.push(b);
       } else if (!aIn && bIn) {
-        // Crossing into the circle — cap sub-stroke at the entry boundary.
         if (ts.length > 0) currentPoints.push(lerp(a, b, ts[0]!));
         finishSubStroke();
-        // B is inside — don't add it.
       } else if (aIn && !bIn) {
-        // Crossing out of the circle — start a new sub-stroke at the exit boundary.
         if (ts.length > 0) currentPoints.push(lerp(a, b, ts[ts.length - 1]!));
         currentPoints.push(b);
       }
-      // aIn && bIn → entirely inside, skip both.
     }
 
     finishSubStroke();
     return result;
   }
 
-  /**
-   * For every stroke that intersects the eraser circle:
-   *   1. Compute surviving sub-strokes via `splitStrokeByEraser`.
-   *   2. Replace the original stroke with the survivors in-place.
-   *   3. Broadcast an `erase_partial` event so remote clients stay in sync.
-   *
-   * A single `redraw()` is called at the end if anything changed.
-   */
   function eraseAt(center: Point): void {
     const radius = getEraserWorldRadius();
     let changed = false;
@@ -323,28 +304,44 @@ export function initDraw(
       const stroke = strokes[i]!;
       if (!strokeIntersectsEraser(stroke, center, radius)) continue;
 
-      const survivors = splitStrokeByEraser(stroke, center, radius);
-
-      // Replace in-place so relative stroke order is preserved for rendering.
-      strokes.splice(i, 1, ...survivors);
-      changed = true;
-
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({
-            type: "erase_partial",
-            roomId,
-            x: center.x,
-            y: center.y,
-            erasedId: stroke.id,
-            replacements: survivors.map((s) => ({
-              id: s.id,
-              points: s.points,
-              color: s.color,
-              lineWidth: s.lineWidth,
-            })),
-          }),
-        );
+      if (stroke.kind === "rect") {
+        // Rects are erased whole (no splitting)
+        strokes.splice(i, 1);
+        changed = true;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "erase_partial",
+              roomId,
+              x: center.x,
+              y: center.y,
+              erasedId: stroke.id,
+              replacements: [],
+            }),
+          );
+        }
+      } else {
+        const survivors = splitStrokeByEraser(stroke, center, radius);
+        strokes.splice(i, 1, ...survivors);
+        changed = true;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "erase_partial",
+              roomId,
+              x: center.x,
+              y: center.y,
+              erasedId: stroke.id,
+              replacements: survivors.map((s) => ({
+                id: s.id,
+                points: s.points,
+                color: s.color,
+                lineWidth: s.lineWidth,
+                kind: "path" as const,
+              })),
+            }),
+          );
+        }
       }
     }
 
@@ -354,8 +351,10 @@ export function initDraw(
   // ── Mouse handlers ──────────────────────────────────────────────────────────
 
   let isDrawing = false;
+  let isDrawingRect = false;
   let isErasing = false;
   let lastPoint: Point | null = null;
+  let rectOrigin: Point | null = null;
 
   function handleMouseDown(e: MouseEvent): void {
     const tool = selectedToolRef.current;
@@ -364,25 +363,23 @@ export function initDraw(
     if (tool === "pencil") {
       isDrawing = true;
       lastPoint = point;
-
       const color = colorRef.current;
       const lineWidth = lineWidthRef.current;
       const strokeId = nextStrokeId++;
-
-      currentStroke = { id: strokeId, points: [point], color, lineWidth };
+      currentStroke = { id: strokeId, kind: "path", points: [point], color, lineWidth };
       strokes.push(currentStroke);
-
       if (socket && socket.readyState === WebSocket.OPEN) {
-        const event: DrawEvent = {
-          type: "draw_start",
-          roomId,
-          x: point.x,
-          y: point.y,
-          color,
-          lineWidth,
-          strokeId,
-        };
-        socket.send(JSON.stringify(event));
+        socket.send(JSON.stringify({ type: "draw_start", roomId, x: point.x, y: point.y, color, lineWidth, strokeId }));
+      }
+    } else if (tool === "rect") {
+      isDrawingRect = true;
+      rectOrigin = point;
+      const color = colorRef.current;
+      const lineWidth = lineWidthRef.current;
+      const strokeId = nextStrokeId++;
+      currentRect = { id: strokeId, kind: "rect", x: point.x, y: point.y, w: 0, h: 0, color, lineWidth };
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "rect_start", roomId, x: point.x, y: point.y, color, lineWidth, strokeId }));
       }
     } else if (tool === "eraser") {
       isErasing = true;
@@ -394,26 +391,21 @@ export function initDraw(
     if (isDrawing && lastPoint && currentStroke) {
       const point = getMousePos(e);
       currentStroke.points.push(point);
-
-      // Draw only the new segment for smooth real-time performance.
-      drawSegment(
-        lastPoint,
-        point,
-        currentStroke.color,
-        currentStroke.lineWidth,
-      );
-
+      drawSegment(lastPoint, point, currentStroke.color, currentStroke.lineWidth);
       if (socket && socket.readyState === WebSocket.OPEN) {
-        const event: DrawEvent = {
-          type: "draw_move",
-          roomId,
-          x: point.x,
-          y: point.y,
-        };
-        socket.send(JSON.stringify(event));
+        socket.send(JSON.stringify({ type: "draw_move", roomId, x: point.x, y: point.y }));
       }
-
       lastPoint = point;
+    } else if (isDrawingRect && currentRect && rectOrigin) {
+      const point = getMousePos(e);
+      currentRect.x = Math.min(rectOrigin.x, point.x);
+      currentRect.y = Math.min(rectOrigin.y, point.y);
+      currentRect.w = Math.abs(point.x - rectOrigin.x);
+      currentRect.h = Math.abs(point.y - rectOrigin.y);
+      redraw(); // redraw preview each move
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "rect_move", roomId, x: point.x, y: point.y }));
+      }
     } else if (isErasing) {
       eraseAt(getMousePos(e));
     }
@@ -423,18 +415,26 @@ export function initDraw(
     if (isDrawing) {
       isDrawing = false;
       currentStroke = null;
-      const point = getMousePos(e);
       lastPoint = null;
-
       if (socket && socket.readyState === WebSocket.OPEN) {
-        const event: DrawEvent = {
-          type: "draw_end",
-          roomId,
-          x: point.x,
-          y: point.y,
-        };
-        socket.send(JSON.stringify(event));
+        const point = getMousePos(e);
+        socket.send(JSON.stringify({ type: "draw_end", roomId, x: point.x, y: point.y }));
       }
+    }
+
+    if (isDrawingRect && currentRect) {
+      isDrawingRect = false;
+      // Only commit rects with meaningful size
+      if (currentRect.w > 2 || currentRect.h > 2) {
+        strokes.push(currentRect);
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          const { x, y, w, h, color, lineWidth, id } = currentRect;
+          socket.send(JSON.stringify({ type: "rect_end", roomId, x, y, x2: x + w, y2: y + h, color, lineWidth, strokeId: id }));
+        }
+      }
+      currentRect = null;
+      rectOrigin = null;
+      redraw();
     }
 
     if (isErasing) {
@@ -452,41 +452,62 @@ export function initDraw(
         const pt = { x: data.x, y: data.y };
         otherUserCurrentStroke = {
           id: data.strokeId ?? nextStrokeId++,
+          kind: "path",
           points: [pt],
           color: data.color ?? "#ff0000",
           lineWidth: data.lineWidth ?? 2,
         };
         strokes.push(otherUserCurrentStroke);
-      } else if (
-        data.type === "draw_move" &&
-        data.roomId === roomId &&
-        otherUserCurrentStroke
-      ) {
-        const prev =
-          otherUserCurrentStroke.points[
-            otherUserCurrentStroke.points.length - 1
-          ]!;
+      } else if (data.type === "draw_move" && data.roomId === roomId && otherUserCurrentStroke) {
+        const prev = otherUserCurrentStroke.points[otherUserCurrentStroke.points.length - 1]!;
         const cur = { x: data.x, y: data.y };
         otherUserCurrentStroke.points.push(cur);
-        drawSegment(
-          prev,
-          cur,
-          otherUserCurrentStroke.color,
-          otherUserCurrentStroke.lineWidth,
-        );
+        drawSegment(prev, cur, otherUserCurrentStroke.color, otherUserCurrentStroke.lineWidth);
       } else if (data.type === "draw_end" && data.roomId === roomId) {
         otherUserCurrentStroke = null;
+
+      } else if (data.type === "rect_start" && data.roomId === roomId) {
+        otherUserCurrentRect = {
+          id: data.strokeId ?? nextStrokeId++,
+          kind: "rect",
+          x: data.x, y: data.y, w: 0, h: 0,
+          color: data.color ?? "#ff0000",
+          lineWidth: data.lineWidth ?? 2,
+        };
+      } else if (data.type === "rect_move" && data.roomId === roomId && otherUserCurrentRect) {
+        const ox = otherUserCurrentRect.x;
+        const oy = otherUserCurrentRect.y;
+        otherUserCurrentRect.x = Math.min(ox, data.x);
+        otherUserCurrentRect.y = Math.min(oy, data.y);
+        otherUserCurrentRect.w = Math.abs(data.x - ox);
+        otherUserCurrentRect.h = Math.abs(data.y - oy);
+        redraw();
+      } else if (data.type === "rect_end" && data.roomId === roomId && data.x2 !== undefined && data.y2 !== undefined) {
+        const rect: RectStroke = {
+          id: data.strokeId ?? nextStrokeId++,
+          kind: "rect",
+          x: Math.min(data.x, data.x2),
+          y: Math.min(data.y, data.y2),
+          w: Math.abs(data.x2 - data.x),
+          h: Math.abs(data.y2 - data.y),
+          color: data.color ?? "#ff0000",
+          lineWidth: data.lineWidth ?? 2,
+        };
+        if (rect.w > 2 || rect.h > 2) strokes.push(rect);
+        otherUserCurrentRect = null;
+        redraw();
+
       } else if (
         data.type === "erase_partial" &&
         data.roomId === roomId &&
         data.erasedId !== undefined &&
         data.replacements
       ) {
-        // Find the original stroke by ID and replace it with the survivors.
         const idx = strokes.findIndex((s) => s.id === data.erasedId);
         if (idx !== -1) {
-          const survivors: Stroke[] = data.replacements.map((r) => ({
+          const survivors: PathStroke[] = data.replacements.map((r) => ({
             id: r.id,
+            kind: "path" as const,
             points: r.points,
             color: r.color,
             lineWidth: r.lineWidth,
@@ -506,24 +527,14 @@ export function initDraw(
     e.preventDefault();
     const touch = e.touches[0];
     if (!touch) return;
-    canvas.dispatchEvent(
-      new MouseEvent("mousedown", {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-      }),
-    );
+    canvas.dispatchEvent(new MouseEvent("mousedown", { clientX: touch.clientX, clientY: touch.clientY }));
   }
 
   function handleTouchMove(e: TouchEvent): void {
     e.preventDefault();
     const touch = e.touches[0];
     if (!touch) return;
-    canvas.dispatchEvent(
-      new MouseEvent("mousemove", {
-        clientX: touch.clientX,
-        clientY: touch.clientY,
-      }),
-    );
+    canvas.dispatchEvent(new MouseEvent("mousemove", { clientX: touch.clientX, clientY: touch.clientY }));
   }
 
   function handleTouchEnd(e: TouchEvent): void {
@@ -540,11 +551,7 @@ export function initDraw(
   canvas.addEventListener("touchstart", handleTouchStart);
   canvas.addEventListener("touchmove", handleTouchMove);
   canvas.addEventListener("touchend", handleTouchEnd);
-  if (socket) {
-    socket.addEventListener("message", handleWebSocketMessage);
-  }
-
-  // ── Cleanup ─────────────────────────────────────────────────────────────────
+  if (socket) socket.addEventListener("message", handleWebSocketMessage);
 
   function cleanup(): void {
     canvas.removeEventListener("mousedown", handleMouseDown);
@@ -554,9 +561,7 @@ export function initDraw(
     canvas.removeEventListener("touchstart", handleTouchStart);
     canvas.removeEventListener("touchmove", handleTouchMove);
     canvas.removeEventListener("touchend", handleTouchEnd);
-    if (socket) {
-      socket.removeEventListener("message", handleWebSocketMessage);
-    }
+    if (socket) socket.removeEventListener("message", handleWebSocketMessage);
   }
 
   return { cleanup, redraw };
