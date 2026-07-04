@@ -15,6 +15,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import type { LineVariant } from "../app/draw/types";
 import { Canvas, type ViewTransform } from "./canvas";
 import { cn } from "@repo/ui/lib/utils";
 
@@ -47,8 +48,8 @@ const TOOLS: ToolDef[] = [
   },
   { id: "pencil", icon: Pencil, label: "Pencil", shortcut: "P", ready: true },
   { id: "rect", icon: Square, label: "Rectangle", shortcut: "R", ready: true },
-  { id: "circle", icon: Circle, label: "Ellipse", shortcut: "O", ready: false },
-  { id: "line", icon: Minus, label: "Line", shortcut: "L", ready: false },
+  { id: "circle", icon: Circle, label: "Ellipse", shortcut: "O", ready: true },
+  { id: "line", icon: Minus, label: "Line", shortcut: "L", ready: true },
   { id: "text", icon: Type, label: "Text", shortcut: "T", ready: false },
   { id: "eraser", icon: Eraser, label: "Eraser", shortcut: "E", ready: true },
 ];
@@ -75,6 +76,40 @@ const ERASER_SIZES = [
   { value: 40, label: "Large" },
 ];
 
+function LineVariantIcon({ variant }: { variant: LineVariant }) {
+  const dashed = variant === "dashed" || variant === "dashed-arrow";
+  const arrow = variant === "arrow" || variant === "dashed-arrow";
+  return (
+    <svg width="20" height="14" viewBox="0 0 20 14" fill="none">
+      <line
+        x1="2"
+        y1="7"
+        x2={arrow ? "13" : "18"}
+        y2="7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeDasharray={dashed ? "3 2.5" : undefined}
+      />
+      {arrow && (
+        <path
+          d="M13 7 L9.5 4.2 M13 7 L9.5 9.8"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          fill="none"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
+
+const LINE_VARIANTS: { value: LineVariant; label: string }[] = [
+  { value: "solid", label: "Solid" },
+  { value: "arrow", label: "Arrow" },
+  { value: "dashed", label: "Dashed" },
+  { value: "dashed-arrow", label: "Dashed arrow" },
+];
+
 export function RoomCanvas({
   roomId,
   roomSlug,
@@ -96,6 +131,7 @@ export function RoomCanvas({
     ty: 0,
     scale: 1,
   });
+  const [lineVariant, setLineVariant] = useState<LineVariant>("solid");
   const [isPanning, setIsPanning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [eraserSize, setEraserSize] = useState(ERASER_SIZES[1]!.value);
@@ -238,8 +274,8 @@ export function RoomCanvas({
         strokeWidth={strokeWidth}
         eraserSize={eraserSize}
         viewTransform={viewTransform}
+        lineVariant={lineVariant}
       />
-
       {/* ── Eraser cursor overlay ──────────────────────── */}
       {selectedTool === "eraser" && mousePos && (
         <div
@@ -422,6 +458,33 @@ export function RoomCanvas({
                   </div>
                 ))}
               </div>
+
+              {selectedTool === "line" && (
+                <>
+                  <div className="w-px h-5 bg-gray-200 mx-1.5" />
+                  <div className="flex items-center gap-1.5 px-1">
+                    {LINE_VARIANTS.map((lv) => (
+                      <div key={lv.value} className="relative group">
+                        <button
+                          onClick={() => setLineVariant(lv.value)}
+                          className={cn(
+                            "w-9 h-9 rounded-xl flex items-center justify-center transition-all text-gray-700",
+                            lineVariant === lv.value
+                              ? "bg-gray-100"
+                              : "hover:bg-gray-100",
+                          )}
+                        >
+                          <LineVariantIcon variant={lv.value} />
+                        </button>
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2.5 px-2.5 py-1.5 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                          {lv.label}
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
