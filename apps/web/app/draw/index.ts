@@ -21,6 +21,8 @@ export function initDraw(
   eraserSizeRef: Ref<number>,
   lineVariantRef: Ref<LineVariant>,
   onPinch?: (factor: number, cx: number, cy: number) => void,
+  initialStrokes?: Stroke[],
+  onChange?: (strokes: Stroke[]) => void,
 ): { cleanup: () => void; redraw: () => void } {
   const maybeCtx = canvas.getContext("2d");
   if (!maybeCtx) {
@@ -29,7 +31,7 @@ export function initDraw(
   }
   const ctx: CanvasRenderingContext2D = maybeCtx;
 
-  const strokes: Stroke[] = [];
+  const strokes: Stroke[] = initialStrokes ? [...initialStrokes] : [];
   let nextStrokeId = Math.floor(Math.random() * 1e9);
   const getNextId = () => nextStrokeId++;
 
@@ -37,6 +39,7 @@ export function initDraw(
   ctx.lineJoin = "round";
 
   const renderer = createRenderer(canvas, ctx, viewTransformRef, strokes);
+  if (strokes.length > 0) renderer.redraw();
 
   const SHAPE_TYPES: StrokeType[] = ["rect", "circle", "line", "triangle"];
 
@@ -90,7 +93,10 @@ export function initDraw(
       }
     }
 
-    if (changed) renderer.redraw();
+    if (changed) {
+      renderer.redraw();
+      onChange?.(strokes);
+    }
   }
 
   function commitOrDiscardShape(stroke: Stroke): void {
@@ -213,6 +219,7 @@ export function initDraw(
       currentStroke = null;
       lastPoint = null;
       renderer.redraw();
+      onChange?.(strokes);
 
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(

@@ -2,7 +2,7 @@
 
 import { initDraw } from "../app/draw";
 import { useEffect, useRef } from "react";
-import type { LineVariant } from "../app/draw/types";
+import type { LineVariant, Stroke } from "../app/draw/types";
 
 export interface ViewTransform {
   tx: number;
@@ -44,6 +44,8 @@ export function Canvas({
   viewTransform,
   lineVariant = "solid",
   onPinchAction,
+  initialStrokes,
+  onStrokesChange,
 }: {
   roomId: string;
   socket?: WebSocket | null;
@@ -54,6 +56,8 @@ export function Canvas({
   viewTransform: ViewTransform;
   lineVariant?: LineVariant;
   onPinchAction?: (factor: number, cx: number, cy: number) => void;
+  initialStrokes?: Stroke[];
+  onStrokesChange?: (strokes: Stroke[]) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -87,6 +91,16 @@ export function Canvas({
     onPinchActionRef.current = onPinchAction;
   }, [onPinchAction]);
 
+  const onStrokesChangeRef = useRef(onStrokesChange);
+  useEffect(() => {
+    onStrokesChangeRef.current = onStrokesChange;
+  }, [onStrokesChange]);
+
+  const initialStrokesRef = useRef(initialStrokes);
+  useEffect(() => {
+    initialStrokesRef.current = initialStrokes;
+  }, [initialStrokes]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -109,6 +123,8 @@ export function Canvas({
       eraserSizeRef,
       lineVariantRef,
       (factor, cx, cy) => onPinchActionRef.current?.(factor, cx, cy),
+      initialStrokesRef.current,
+      (strokes) => onStrokesChangeRef.current?.(strokes),
     );
 
     redrawRef.current = redraw;

@@ -24,3 +24,7 @@ export const ChangePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(6),
 });
+
+export const SaveCanvasSchema = z.object({
+  strokes: z.array(z.record(z.string(), z.any())),
+});

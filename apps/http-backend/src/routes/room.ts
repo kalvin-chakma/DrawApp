@@ -1,7 +1,7 @@
 import express, { Router } from "express";
 import { db } from "@repo/db/client";
 import { AuthenticatedRequest, middleware } from "../middleware";
-import { CreateRoomSchema } from "@repo/common/types";
+import { CreateRoomSchema, SaveCanvasSchema } from "@repo/common/types";
 
 const roomRouter: Router = express.Router();
 
@@ -75,6 +75,32 @@ roomRouter.delete("/:id", middleware, async (req: AuthenticatedRequest, res) => 
     res.status(500).json({ message: "Failed to delete room" });
   }
 });
+
+roomRouter.put(
+  "/:id/canvas",
+  middleware,
+  async (req: AuthenticatedRequest, res) => {
+    const roomId = Number(req.params.id);
+    if (!Number.isInteger(roomId)) {
+      res.status(400).json({ message: "Invalid room id" });
+      return;
+    }
+    const parsed = SaveCanvasSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ message: "Invalid Input" });
+      return;
+    }
+    try {
+      const room = await db.room.update({
+        where: { id: roomId },
+        data: { canvasState: parsed.data.strokes },
+      });
+      res.json({ id: room.id, canvasState: room.canvasState });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save canvas" });
+    }
+  },
+);
 
 roomRouter.get("/:slug", async (req, res) => {
   const room = await db.room.findUnique({

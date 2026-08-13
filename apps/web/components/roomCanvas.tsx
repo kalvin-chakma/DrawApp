@@ -19,9 +19,10 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { PiShapesBold } from "react-icons/pi";
-import type { LineVariant } from "../app/draw/types";
+import type { LineVariant, Stroke } from "../app/draw/types";
 import { Canvas, type ViewTransform } from "./canvas";
 import { cn } from "@repo/ui/lib/utils";
+import { saveCanvas } from "../services/api";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
 
@@ -154,14 +155,18 @@ const LINE_VARIANTS: { value: LineVariant; label: string }[] = [
   { value: "dashed-arrow", label: "Dashed arrow" },
 ];
 
+const CANVAS_SAVE_DEBOUNCE_MS = 1200;
+
 export function RoomCanvas({
   roomId,
   roomSlug,
   token,
+  initialStrokes,
 }: {
   roomId: string;
   roomSlug: string;
   token: string;
+  initialStrokes?: Stroke[];
 }) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [status, setStatus] = useState<
@@ -195,6 +200,37 @@ export function RoomCanvas({
   const activeShapeTool = SHAPE_TOOLS.find((t) => t.id === selectedTool);
 
   useEffect(() => setMounted(true), []);
+
+  // Debounced auto-save of the canvas to the database
+  const pendingStrokesRef = useRef<Stroke[] | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushCanvasSave = useCallback(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (pendingStrokesRef.current) {
+      saveCanvas(Number(roomId), pendingStrokesRef.current).catch(() => {});
+      pendingStrokesRef.current = null;
+    }
+  }, [roomId]);
+
+  const handleStrokesChange = useCallback(
+    (strokes: Stroke[]) => {
+      pendingStrokesRef.current = strokes;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(
+        flushCanvasSave,
+        CANVAS_SAVE_DEBOUNCE_MS,
+      );
+    },
+    [flushCanvasSave],
+  );
+
+  useEffect(() => {
+    return () => flushCanvasSave();
+  }, [flushCanvasSave]);
 
   const toggleShapesMenu = () => {
     if (!shapesMenuOpen && shapesMenuRef.current) {
@@ -371,6 +407,8 @@ export function RoomCanvas({
         viewTransform={viewTransform}
         lineVariant={lineVariant}
         onPinchAction={handlePinch}
+        initialStrokes={initialStrokes}
+        onStrokesChange={handleStrokesChange}
       />
 
       {selectedTool === "select" && (

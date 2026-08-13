@@ -4,12 +4,14 @@ import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { RoomCanvas } from "../../../components/roomCanvas";
 import { getRoomBySlug } from "../../../services/api";
+import type { Stroke } from "../../draw/types";
 
 interface Room {
   id: number;
   slug: string;
   adminId: string;
   createdAt: string;
+  canvasState: Stroke[] | null;
 }
 
 export default function RoomPage({
@@ -78,6 +80,7 @@ export default function RoomPage({
       roomId={room.id.toString()}
       roomSlug={room.slug}
       token={token}
+      initialStrokes={room.canvasState ?? undefined}
     />
   );
 }

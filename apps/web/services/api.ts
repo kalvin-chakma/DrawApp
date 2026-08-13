@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { Stroke } from "../app/draw/types";
 
 export const API =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
@@ -48,3 +49,6 @@ export const getDashboardStats = () => apiClient.get("/room/stats");
 export const getRoomBySlug = (slug: string) => apiClient.get(`/room/${slug}`);
 
 export const deleteRoom = (id: number) => apiClient.delete(`/room/${id}`);
+
+export const saveCanvas = (roomId: number, strokes: Stroke[]) =>
+  apiClient.put(`/room/${roomId}/canvas`, { strokes });

@@ -1,7 +1,6 @@
 import {
   LayoutDashboard,
   DoorOpen,
-  FileText,
   User,
   Settings,
   type LucideIcon,
@@ -16,7 +15,6 @@ export interface DashboardNavItem {
 export const dashboardNavItems: DashboardNavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Rooms", href: "/dashboard/rooms", icon: DoorOpen },
-  { label: "Notes", href: "/dashboard/notes", icon: FileText },
   { label: "Profile", href: "/dashboard/profile", icon: User },
   { label: "Settings", href: "/dashboard/settings", icon: Settings },
 ];
