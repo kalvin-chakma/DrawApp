@@ -57,3 +57,17 @@ export function segmentCircleIntersections(
 export function lerp(a: Point, b: Point, t: number): Point {
   return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
 }
+
+// Isosceles triangle inscribed in the bounding box spanned by the two
+// stroke points — apex centered on top, base along the bottom edge.
+export function triangleVertices(p1: Point, p2: Point): [Point, Point, Point] {
+  const x1 = Math.min(p1.x, p2.x);
+  const y1 = Math.min(p1.y, p2.y);
+  const x2 = Math.max(p1.x, p2.x);
+  const y2 = Math.max(p1.y, p2.y);
+  return [
+    { x: (x1 + x2) / 2, y: y1 },
+    { x: x2, y: y2 },
+    { x: x1, y: y2 },
+  ];
+}

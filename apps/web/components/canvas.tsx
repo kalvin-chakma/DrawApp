@@ -10,6 +10,30 @@ export interface ViewTransform {
   scale: number;
 }
 
+const CROSSHAIR_SVG =
+  "<svg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'>" +
+  "<g stroke='black' stroke-width='1.6' stroke-linecap='round'>" +
+  "<line x1='11' y1='2' x2='11' y2='8.5'/>" +
+  "<line x1='11' y1='13.5' x2='11' y2='20'/>" +
+  "<line x1='2' y1='11' x2='8.5' y2='11'/>" +
+  "<line x1='13.5' y1='11' x2='20' y2='11'/>" +
+  "</g>" +
+  "<circle cx='11' cy='11' r='1.4' fill='black'/>" +
+  "</svg>";
+const CROSSHAIR_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(CROSSHAIR_SVG)}") 11 11, crosshair`;
+
+function buildEraserCursor(radius: number): string {
+  const r = Math.max(4, Math.min(radius, 40));
+  const size = r * 2 + 4;
+  const c = size / 2;
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}' viewBox='0 0 ${size} ${size}'>` +
+    `<circle cx='${c}' cy='${c}' r='${r}' fill='rgba(255,255,255,0.35)' stroke='black' stroke-width='1.5'/>` +
+    `<circle cx='${c}' cy='${c}' r='1.2' fill='black'/>` +
+    `</svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, auto`;
+}
+
 export function Canvas({
   roomId,
   socket,
@@ -19,6 +43,7 @@ export function Canvas({
   eraserSize,
   viewTransform,
   lineVariant = "solid",
+  onPinchAction,
 }: {
   roomId: string;
   socket?: WebSocket | null;
@@ -28,6 +53,7 @@ export function Canvas({
   eraserSize: number;
   viewTransform: ViewTransform;
   lineVariant?: LineVariant;
+  onPinchAction?: (factor: number, cx: number, cy: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -56,12 +82,21 @@ export function Canvas({
 
   const redrawRef = useRef<() => void>(() => {});
 
+  const onPinchActionRef = useRef(onPinchAction);
+  useEffect(() => {
+    onPinchActionRef.current = onPinchAction;
+  }, [onPinchAction]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const resizeObserver = new ResizeObserver(() => {
+      canvas.width = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      redrawRef.current();
+    });
+    resizeObserver.observe(canvas);
 
     const { cleanup, redraw } = initDraw(
       canvas,
@@ -73,10 +108,14 @@ export function Canvas({
       viewTransformRef,
       eraserSizeRef,
       lineVariantRef,
+      (factor, cx, cy) => onPinchActionRef.current?.(factor, cx, cy),
     );
 
     redrawRef.current = redraw;
-    return cleanup;
+    return () => {
+      cleanup();
+      resizeObserver.disconnect();
+    };
   }, [roomId, socket]);
 
   useEffect(() => {
@@ -88,10 +127,11 @@ export function Canvas({
     selectedTool === "pencil" ||
     selectedTool === "line" ||
     selectedTool === "rect" ||
-    selectedTool === "circle"
-      ? "crosshair"
+    selectedTool === "circle" ||
+    selectedTool === "triangle"
+      ? CROSSHAIR_CURSOR
       : selectedTool === "eraser"
-        ? "none"
+        ? buildEraserCursor(eraserSize)
         : "default";
 
   return (

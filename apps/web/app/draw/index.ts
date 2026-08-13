@@ -20,6 +20,7 @@ export function initDraw(
   viewTransformRef: Ref<ViewTransform>,
   eraserSizeRef: Ref<number>,
   lineVariantRef: Ref<LineVariant>,
+  onPinch?: (factor: number, cx: number, cy: number) => void,
 ): { cleanup: () => void; redraw: () => void } {
   const maybeCtx = canvas.getContext("2d");
   if (!maybeCtx) {
@@ -37,20 +38,21 @@ export function initDraw(
 
   const renderer = createRenderer(canvas, ctx, viewTransformRef, strokes);
 
-  const SHAPE_TYPES: StrokeType[] = ["rect", "circle", "line"];
+  const SHAPE_TYPES: StrokeType[] = ["rect", "circle", "line", "triangle"];
 
   function toolToStrokeType(tool: string): StrokeType | null {
     if (tool === "pencil") return "pencil";
     if (tool === "rect") return "rect";
     if (tool === "circle") return "circle";
     if (tool === "line") return "line";
+    if (tool === "triangle") return "triangle";
     return null;
   }
 
   let currentStroke: Stroke | null = null;
   let otherUserCurrentStroke: Stroke | null = null;
 
-  // ── Eraser ────────────────────────────────────────────────────────────────
+  // Eraser
 
   function getEraserWorldRadius(): number {
     return eraserSizeRef.current / viewTransformRef.current.scale;
@@ -102,7 +104,7 @@ export function initDraw(
     }
   }
 
-  // ── Mouse handlers ───────────────────────────────────────────────────────
+  // Mouse handlers
 
   let isDrawing = false;
   let isErasing = false;
@@ -222,7 +224,7 @@ export function initDraw(
     if (isErasing) isErasing = false;
   }
 
-  // ── WebSocket handler ────────────────────────────────────────────────────
+  // WebSocket handler
 
   function handleWebSocketMessage(event: MessageEvent): void {
     try {
@@ -284,34 +286,90 @@ export function initDraw(
     }
   }
 
-  // ── Touch forwarding ─────────────────────────────────────────────────────
+  // Touch handlers
+  let lastTouchDist: number | null = null;
+
+  function getTouchDist(e: TouchEvent): number {
+    const a = e.touches[0]!;
+    const b = e.touches[1]!;
+    return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+  }
+
+  function getTouchMidpoint(e: TouchEvent): { x: number; y: number } {
+    const a = e.touches[0]!;
+    const b = e.touches[1]!;
+    return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+  }
 
   function handleTouchStart(e: TouchEvent): void {
     e.preventDefault();
+    if (e.touches.length === 2) {
+      if (isDrawing && currentStroke) {
+        commitOrDiscardShape(currentStroke);
+        isDrawing = false;
+        currentStroke = null;
+        lastPoint = null;
+        renderer.redraw();
+      }
+      lastTouchDist = getTouchDist(e);
+      return;
+    }
     const touch = e.touches[0];
     if (!touch) return;
-    canvas.dispatchEvent(new MouseEvent("mousedown", { clientX: touch.clientX, clientY: touch.clientY }));
-  }
-  function handleTouchMove(e: TouchEvent): void {
-    e.preventDefault();
-    const touch = e.touches[0];
-    if (!touch) return;
-    canvas.dispatchEvent(new MouseEvent("mousemove", { clientX: touch.clientX, clientY: touch.clientY }));
-  }
-  function handleTouchEnd(e: TouchEvent): void {
-    e.preventDefault();
-    canvas.dispatchEvent(new MouseEvent("mouseup", {}));
+    const synth = new MouseEvent("mousedown", {
+      bubbles: false,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    });
+    handleMouseDown(synth);
   }
 
-  // ── Register listeners ───────────────────────────────────────────────────
+  function handleTouchMove(e: TouchEvent): void {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      const dist = getTouchDist(e);
+      if (lastTouchDist !== null) {
+        const factor = dist / lastTouchDist;
+        const mid = getTouchMidpoint(e);
+        onPinch?.(factor, mid.x, mid.y);
+      }
+      lastTouchDist = dist;
+      return;
+    }
+    lastTouchDist = null;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const synth = new MouseEvent("mousemove", {
+      bubbles: false,
+      clientX: touch.clientX,
+      clientY: touch.clientY,
+    });
+    handleMouseMove(synth);
+  }
+
+  function handleTouchEnd(e: TouchEvent): void {
+    e.preventDefault();
+    lastTouchDist = null;
+    if (e.touches.length > 0) return;
+    const changed = e.changedTouches[0];
+    const synth = new MouseEvent("mouseup", {
+      bubbles: false,
+      clientX: changed?.clientX ?? 0,
+      clientY: changed?.clientY ?? 0,
+    });
+    handleMouseUp(synth);
+  }
+
+  // Register listeners
 
   canvas.addEventListener("mousedown", handleMouseDown);
   canvas.addEventListener("mousemove", handleMouseMove);
   canvas.addEventListener("mouseup", handleMouseUp);
   canvas.addEventListener("mouseout", handleMouseUp);
-  canvas.addEventListener("touchstart", handleTouchStart);
-  canvas.addEventListener("touchmove", handleTouchMove);
-  canvas.addEventListener("touchend", handleTouchEnd);
+  canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+  canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+  canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
+  canvas.addEventListener("touchcancel", handleTouchEnd, { passive: false });
   if (socket) socket.addEventListener("message", handleWebSocketMessage);
 
   function cleanup(): void {
@@ -322,6 +380,7 @@ export function initDraw(
     canvas.removeEventListener("touchstart", handleTouchStart);
     canvas.removeEventListener("touchmove", handleTouchMove);
     canvas.removeEventListener("touchend", handleTouchEnd);
+    canvas.removeEventListener("touchcancel", handleTouchEnd);
     if (socket) socket.removeEventListener("message", handleWebSocketMessage);
   }
 

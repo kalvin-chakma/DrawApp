@@ -1,4 +1,4 @@
-export type StrokeType = "pencil" | "rect" | "circle" | "line";
+export type StrokeType = "pencil" | "rect" | "circle" | "line" | "triangle";
 
 export type LineVariant = "solid" | "dashed" | "arrow" | "dashed-arrow";
 

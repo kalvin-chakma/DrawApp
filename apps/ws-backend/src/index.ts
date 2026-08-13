@@ -4,7 +4,7 @@ import jwt, { JwtPayload } from "jsonwebtoken";
 import { JWT_SECRET } from "@repo/common/env-variable";
 import { db } from "@repo/db/client";
 
-const PORT = 8080;
+const PORT = Number(process.env.PORT) || 8080;
 const wss = new WebSocketServer({ port: PORT });
 
 wss.on("listening", () => {

@@ -1,4 +1,5 @@
 import type { Point, Stroke, ViewTransform, Ref, LineVariant } from "./types";
+import { triangleVertices } from "./geometry";
 
 export interface Renderer {
   applyTransform(): void;
@@ -87,6 +88,18 @@ export function createRenderer(
       if (rx < 0.5 || ry < 0.5) return;
       ctx.beginPath();
       ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+      ctx.stroke();
+    } else if (stroke.type === "triangle") {
+      if (stroke.points.length < 2) return;
+      const p1 = stroke.points[0]!;
+      const p2 = stroke.points[1]!;
+      if (Math.abs(p2.x - p1.x) < 1 || Math.abs(p2.y - p1.y) < 1) return;
+      const [a, b, c] = triangleVertices(p1, p2);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.lineTo(c.x, c.y);
+      ctx.closePath();
       ctx.stroke();
     } else if (stroke.type === "line") {
       if (stroke.points.length < 2) return;

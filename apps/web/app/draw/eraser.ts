@@ -4,6 +4,7 @@ import {
   lerp,
   pointToSegmentDistance,
   segmentCircleIntersections,
+  triangleVertices,
 } from "./geometry";
 
 export function strokeIntersectsEraser(
@@ -60,6 +61,19 @@ export function strokeIntersectsEraser(
     return false;
   }
 
+  if (stroke.type === "triangle") {
+    if (stroke.points.length < 2) return false;
+    const [a, b, c] = triangleVertices(stroke.points[0]!, stroke.points[1]!);
+    const sides: [Point, Point][] = [
+      [a, b],
+      [b, c],
+      [c, a],
+    ];
+    return sides.some(
+      ([p, q]) => pointToSegmentDistance(center, p, q) <= radius,
+    );
+  }
+
   // line: treat as a single segment hit-test
   if (stroke.type === "line") {
     if (stroke.points.length < 2) return false;
@@ -91,7 +105,8 @@ export function splitStrokeByEraser(
   if (
     stroke.type === "rect" ||
     stroke.type === "circle" ||
-    stroke.type === "line"
+    stroke.type === "line" ||
+    stroke.type === "triangle"
   )
     return [];
 
