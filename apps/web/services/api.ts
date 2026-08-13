@@ -27,6 +27,16 @@ export const signup = (credentials: {
 
 export const getCurrentUser = () => apiClient.get("/auth/me");
 
+export const updateProfile = (data: { name: string; photo?: string }) =>
+  apiClient.put("/auth/me", data);
+
+export const changePassword = (data: {
+  currentPassword: string;
+  newPassword: string;
+}) => apiClient.put("/auth/password", data);
+
+export const deleteAccount = () => apiClient.delete("/auth/me");
+
 // Room APIs
 export const createRoom = (data: { name: string }) =>
   apiClient.post("/room", data);
@@ -36,3 +46,5 @@ export const getUserRooms = () => apiClient.get("/room/user/rooms");
 export const getDashboardStats = () => apiClient.get("/room/stats");
 
 export const getRoomBySlug = (slug: string) => apiClient.get(`/room/${slug}`);
+
+export const deleteRoom = (id: number) => apiClient.delete(`/room/${id}`);

@@ -14,3 +14,13 @@ export const SigninSchema = z.object({
 export const CreateRoomSchema = z.object({
   name: z.string().min(3),
 });
+
+export const UpdateProfileSchema = z.object({
+  name: z.string().min(1),
+  photo: z.string().url().optional().or(z.literal("")),
+});
+
+export const ChangePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6),
+});

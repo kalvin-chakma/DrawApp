@@ -49,6 +49,33 @@ roomRouter.get("/stats", middleware, async (req: AuthenticatedRequest, res) => {
   }
 });
 
+roomRouter.delete("/:id", middleware, async (req: AuthenticatedRequest, res) => {
+  const userId = req.userId!;
+  const roomId = Number(req.params.id);
+  if (!Number.isInteger(roomId)) {
+    res.status(400).json({ message: "Invalid room id" });
+    return;
+  }
+  try {
+    const room = await db.room.findUnique({ where: { id: roomId } });
+    if (!room) {
+      res.status(404).json({ message: "Room not found" });
+      return;
+    }
+    if (room.adminId !== userId) {
+      res.status(403).json({ message: "Only the room admin can delete this room" });
+      return;
+    }
+    await db.$transaction([
+      db.chat.deleteMany({ where: { roomId } }),
+      db.room.delete({ where: { id: roomId } }),
+    ]);
+    res.json({ message: "Room deleted" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to delete room" });
+  }
+});
+
 roomRouter.get("/:slug", async (req, res) => {
   const room = await db.room.findUnique({
     where: { slug: req.params.slug },

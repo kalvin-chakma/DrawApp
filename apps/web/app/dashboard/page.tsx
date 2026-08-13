@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   DoorOpen,
-  Plus,
   ArrowRight,
   AlertCircle,
   Clock,
@@ -243,7 +242,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {rooms.slice(0, 5).map((room) => (
+            {rooms.slice(0, 3).map((room) => (
               <button
                 key={room.id}
                 onClick={() => router.push(`/room/${room.slug}`)}
@@ -270,30 +269,6 @@ export default function DashboardPage() {
         )}
       </section>
 
-      {/* Quick Actions */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
-          Quick Actions
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <QuickActionCard
-            icon={Plus}
-            label="Create Room"
-            description="Start a new collaborative canvas"
-            onClick={() => setCreateModalOpen(true)}
-            color="slate"
-          />
-          <QuickActionCard
-            icon={DoorOpen}
-            label="Join Room"
-            description="Enter an existing room by name"
-            onClick={() => setJoinModalOpen(true)}
-            color="zinc"
-          />
-        </div>
-      </section>
-
       {/* Modals */}
       <JoinRoomModal
         open={joinModalOpen}
@@ -304,62 +279,5 @@ export default function DashboardPage() {
         onClose={() => setCreateModalOpen(false)}
       />
     </div>
-  );
-}
-
-// ─── Quick Action Card ────────────────────────────────────────────────────────
-
-interface QuickActionCardProps {
-  icon: React.ElementType;
-  label: string;
-  description: string;
-  onClick: () => void;
-  color: "slate" | "zinc" | "stone";
-}
-
-const colorMap = {
-  slate: {
-    bg: "bg-slate-50 hover:bg-slate-100",
-    iconBg: "bg-slate-100",
-    iconColor: "text-slate-600",
-    text: "text-slate-700",
-  },
-  zinc: {
-    bg: "bg-zinc-50 hover:bg-zinc-100",
-    iconBg: "bg-zinc-100",
-    iconColor: "text-zinc-600",
-    text: "text-zinc-700",
-  },
-  stone: {
-    bg: "bg-stone-50 hover:bg-stone-100",
-    iconBg: "bg-stone-100",
-    iconColor: "text-stone-600",
-    text: "text-stone-700",
-  },
-};
-
-function QuickActionCard({
-  icon: Icon,
-  label,
-  description,
-  onClick,
-  color,
-}: QuickActionCardProps) {
-  const c = colorMap[color];
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-4 p-4 rounded-xl border border-transparent hover:border-gray-200 transition-all text-left group ${c.bg}`}
-    >
-      <div
-        className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${c.iconBg}`}
-      >
-        <Icon className={`w-5 h-5 ${c.iconColor}`} />
-      </div>
-      <div className="min-w-0">
-        <p className={`text-sm font-semibold ${c.text}`}>{label}</p>
-        <p className="text-xs text-gray-500 truncate">{description}</p>
-      </div>
-    </button>
   );
 }
