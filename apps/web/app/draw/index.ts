@@ -23,17 +23,76 @@ export function initDraw(
   onPinch?: (factor: number, cx: number, cy: number) => void,
   initialStrokes?: Stroke[],
   onChange?: (strokes: Stroke[]) => void,
-): { cleanup: () => void; redraw: () => void } {
+  onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void,
+): {
+  cleanup: () => void;
+  redraw: () => void;
+  undo: () => void;
+  redo: () => void;
+} {
   const maybeCtx = canvas.getContext("2d");
   if (!maybeCtx) {
     console.error("Failed to get 2D context from canvas");
-    return { cleanup: () => {}, redraw: () => {} };
+    return {
+      cleanup: () => {},
+      redraw: () => {},
+      undo: () => {},
+      redo: () => {},
+    };
   }
   const ctx: CanvasRenderingContext2D = maybeCtx;
 
   const strokes: Stroke[] = initialStrokes ? [...initialStrokes] : [];
   let nextStrokeId = Math.floor(Math.random() * 1e9);
   const getNextId = () => nextStrokeId++;
+
+  // Undo/redo history — local to this client. Each entry is a full snapshot
+  // of `strokes` taken immediately before a committed change (finished
+  // shape/pencil stroke, or an erase gesture). Kept local rather than
+  // broadcast: strokes[] is shared with remote edits, so replaying a stale
+  // snapshot over the wire could silently wipe out a collaborator's newer
+  // work. Undo/redo therefore only rewinds *your* view (and, via onChange,
+  // what gets persisted next).
+  const MAX_HISTORY = 50;
+  const undoStack: Stroke[][] = [];
+  const redoStack: Stroke[][] = [];
+
+  function cloneStrokes(list: Stroke[]): Stroke[] {
+    return list.map((s) => ({ ...s, points: s.points.map((p) => ({ ...p })) }));
+  }
+
+  function recordHistory(before: Stroke[]): void {
+    undoStack.push(before);
+    if (undoStack.length > MAX_HISTORY) undoStack.shift();
+    redoStack.length = 0;
+    onHistoryChange?.(undoStack.length > 0, redoStack.length > 0);
+  }
+
+  function applyStrokes(next: Stroke[]): void {
+    strokes.splice(0, strokes.length, ...next);
+    renderer.redraw();
+    onChange?.(strokes);
+  }
+
+  function undo(): void {
+    if (undoStack.length === 0) return;
+    const prev = undoStack.pop()!;
+    redoStack.push(cloneStrokes(strokes));
+    applyStrokes(prev);
+    onHistoryChange?.(undoStack.length > 0, redoStack.length > 0);
+  }
+
+  function redo(): void {
+    if (redoStack.length === 0) return;
+    const next = redoStack.pop()!;
+    undoStack.push(cloneStrokes(strokes));
+    applyStrokes(next);
+    onHistoryChange?.(undoStack.length > 0, redoStack.length > 0);
+  }
+
+  let strokeStartSnapshot: Stroke[] | null = null;
+  let eraseStartSnapshot: Stroke[] | null = null;
+  let erasedDuringGesture = false;
 
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -96,6 +155,7 @@ export function initDraw(
     if (changed) {
       renderer.redraw();
       onChange?.(strokes);
+      erasedDuringGesture = true;
     }
   }
 
@@ -124,6 +184,7 @@ export function initDraw(
     if (strokeType === "pencil") {
       isDrawing = true;
       lastPoint = point;
+      strokeStartSnapshot = cloneStrokes(strokes);
       const color = colorRef.current;
       const lineWidth = lineWidthRef.current;
       const strokeId = getNextId();
@@ -145,6 +206,7 @@ export function initDraw(
       }
     } else if (strokeType && SHAPE_TYPES.includes(strokeType)) {
       isDrawing = true;
+      strokeStartSnapshot = cloneStrokes(strokes);
       const color = colorRef.current;
       const lineWidth = lineWidthRef.current;
       const strokeId = getNextId();
@@ -178,6 +240,8 @@ export function initDraw(
       }
     } else if (tool === "eraser") {
       isErasing = true;
+      eraseStartSnapshot = cloneStrokes(strokes);
+      erasedDuringGesture = false;
       eraseAt(point);
     }
   }
@@ -213,13 +277,18 @@ export function initDraw(
       if (currentStroke.type !== "pencil") {
         currentStroke.points[1] = point;
       }
+      const strokeId = currentStroke.id;
       commitOrDiscardShape(currentStroke);
+      const survived = strokes.some((s) => s.id === strokeId);
 
       isDrawing = false;
       currentStroke = null;
       lastPoint = null;
       renderer.redraw();
       onChange?.(strokes);
+
+      if (survived && strokeStartSnapshot) recordHistory(strokeStartSnapshot);
+      strokeStartSnapshot = null;
 
       if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(
@@ -228,7 +297,14 @@ export function initDraw(
       }
     }
 
-    if (isErasing) isErasing = false;
+    if (isErasing) {
+      isErasing = false;
+      if (erasedDuringGesture && eraseStartSnapshot) {
+        recordHistory(eraseStartSnapshot);
+      }
+      eraseStartSnapshot = null;
+      erasedDuringGesture = false;
+    }
   }
 
   // WebSocket handler
@@ -312,11 +388,16 @@ export function initDraw(
     e.preventDefault();
     if (e.touches.length === 2) {
       if (isDrawing && currentStroke) {
+        const strokeId = currentStroke.id;
         commitOrDiscardShape(currentStroke);
+        const survived = strokes.some((s) => s.id === strokeId);
         isDrawing = false;
         currentStroke = null;
         lastPoint = null;
         renderer.redraw();
+        onChange?.(strokes);
+        if (survived && strokeStartSnapshot) recordHistory(strokeStartSnapshot);
+        strokeStartSnapshot = null;
       }
       lastTouchDist = getTouchDist(e);
       return;
@@ -391,5 +472,5 @@ export function initDraw(
     if (socket) socket.removeEventListener("message", handleWebSocketMessage);
   }
 
-  return { cleanup, redraw: renderer.redraw };
+  return { cleanup, redraw: renderer.redraw, undo, redo };
 }

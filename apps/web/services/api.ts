@@ -48,6 +48,9 @@ export const getDashboardStats = () => apiClient.get("/room/stats");
 
 export const getRoomBySlug = (slug: string) => apiClient.get(`/room/${slug}`);
 
+export const getRoomByViewToken = (viewToken: string) =>
+  apiClient.get(`/room/view/${viewToken}`);
+
 export const deleteRoom = (id: number) => apiClient.delete(`/room/${id}`);
 
 export const saveCanvas = (roomId: number, strokes: Stroke[]) =>

@@ -12,6 +12,7 @@ interface Room {
   adminId: string;
   createdAt: string;
   canvasState: Stroke[] | null;
+  viewToken: string;
 }
 
 export default function RoomPage({
@@ -81,6 +82,7 @@ export default function RoomPage({
       roomSlug={room.slug}
       token={token}
       initialStrokes={room.canvasState ?? undefined}
+      viewToken={room.viewToken}
     />
   );
 }

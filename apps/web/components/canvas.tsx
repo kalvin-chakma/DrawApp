@@ -1,13 +1,18 @@
 "use client";
 
 import { initDraw } from "../app/draw";
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import type { LineVariant, Stroke } from "../app/draw/types";
 
 export interface ViewTransform {
   tx: number;
   ty: number;
   scale: number;
+}
+
+export interface CanvasHandle {
+  undo: () => void;
+  redo: () => void;
 }
 
 const CROSSHAIR_SVG =
@@ -34,31 +39,39 @@ function buildEraserCursor(radius: number): string {
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, auto`;
 }
 
-export function Canvas({
-  roomId,
-  socket,
-  selectedTool,
-  strokeColor,
-  strokeWidth,
-  eraserSize,
-  viewTransform,
-  lineVariant = "solid",
-  onPinchAction,
-  initialStrokes,
-  onStrokesChange,
-}: {
-  roomId: string;
-  socket?: WebSocket | null;
-  selectedTool: string;
-  strokeColor: string;
-  strokeWidth: number;
-  eraserSize: number;
-  viewTransform: ViewTransform;
-  lineVariant?: LineVariant;
-  onPinchAction?: (factor: number, cx: number, cy: number) => void;
-  initialStrokes?: Stroke[];
-  onStrokesChange?: (strokes: Stroke[]) => void;
-}) {
+export const Canvas = forwardRef<
+  CanvasHandle,
+  {
+    roomId: string;
+    socket?: WebSocket | null;
+    selectedTool: string;
+    strokeColor: string;
+    strokeWidth: number;
+    eraserSize: number;
+    viewTransform: ViewTransform;
+    lineVariant?: LineVariant;
+    onPinchAction?: (factor: number, cx: number, cy: number) => void;
+    initialStrokes?: Stroke[];
+    onStrokesChange?: (strokes: Stroke[]) => void;
+    onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void;
+  }
+>(function Canvas(
+  {
+    roomId,
+    socket,
+    selectedTool,
+    strokeColor,
+    strokeWidth,
+    eraserSize,
+    viewTransform,
+    lineVariant = "solid",
+    onPinchAction,
+    initialStrokes,
+    onStrokesChange,
+    onHistoryChange,
+  },
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const viewTransformRef = useRef<ViewTransform>(viewTransform);
@@ -96,10 +109,27 @@ export function Canvas({
     onStrokesChangeRef.current = onStrokesChange;
   }, [onStrokesChange]);
 
+  const onHistoryChangeRef = useRef(onHistoryChange);
+  useEffect(() => {
+    onHistoryChangeRef.current = onHistoryChange;
+  }, [onHistoryChange]);
+
   const initialStrokesRef = useRef(initialStrokes);
   useEffect(() => {
     initialStrokesRef.current = initialStrokes;
   }, [initialStrokes]);
+
+  const undoRef = useRef<() => void>(() => {});
+  const redoRef = useRef<() => void>(() => {});
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      undo: () => undoRef.current(),
+      redo: () => redoRef.current(),
+    }),
+    [],
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -112,7 +142,7 @@ export function Canvas({
     });
     resizeObserver.observe(canvas);
 
-    const { cleanup, redraw } = initDraw(
+    const { cleanup, redraw, undo, redo } = initDraw(
       canvas,
       roomId,
       socket,
@@ -125,9 +155,12 @@ export function Canvas({
       (factor, cx, cy) => onPinchActionRef.current?.(factor, cx, cy),
       initialStrokesRef.current,
       (strokes) => onStrokesChangeRef.current?.(strokes),
+      (canUndo, canRedo) => onHistoryChangeRef.current?.(canUndo, canRedo),
     );
 
     redrawRef.current = redraw;
+    undoRef.current = undo;
+    redoRef.current = redo;
     return () => {
       cleanup();
       resizeObserver.disconnect();
@@ -164,4 +197,4 @@ export function Canvas({
       }}
     />
   );
-}
+});

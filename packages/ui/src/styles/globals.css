@@ -93,8 +93,13 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
+	html {
+		scroll-behavior: smooth;
+		-webkit-text-size-adjust: 100%;
+	}
 	body {
 		@apply bg-background text-foreground;
+		overflow-x: hidden;
 	}
 	/* https://tailwindcss.com/docs/upgrade-guide#buttons-use-the-default-cursor */
 	button:not(:disabled),

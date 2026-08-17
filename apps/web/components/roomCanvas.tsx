@@ -17,10 +17,12 @@ import {
   Share2,
   ZoomIn,
   ZoomOut,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import { PiShapesBold } from "react-icons/pi";
 import type { LineVariant, Stroke } from "../app/draw/types";
-import { Canvas, type ViewTransform } from "./canvas";
+import { Canvas, type CanvasHandle, type ViewTransform } from "./canvas";
 import { cn } from "@repo/ui/lib/utils";
 import { saveCanvas } from "../services/api";
 
@@ -162,11 +164,13 @@ export function RoomCanvas({
   roomSlug,
   token,
   initialStrokes,
+  viewToken,
 }: {
   roomId: string;
   roomSlug: string;
   token: string;
   initialStrokes?: Stroke[];
+  viewToken?: string;
 }) {
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [status, setStatus] = useState<
@@ -182,7 +186,9 @@ export function RoomCanvas({
   });
   const [lineVariant, setLineVariant] = useState<LineVariant>("solid");
   const [isPanning, setIsPanning] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"edit" | "view" | null>(null);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
   const [eraserSize, setEraserSize] = useState(10);
   const [shapesMenuOpen, setShapesMenuOpen] = useState(false);
   const [shapesMenuPos, setShapesMenuPos] = useState<{
@@ -190,12 +196,25 @@ export function RoomCanvas({
     bottom: number;
   } | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const shapesMenuRef = useRef<HTMLDivElement>(null);
   const shapesPopoverRef = useRef<HTMLDivElement>(null);
   const lastPanRef = useRef({ x: 0, y: 0 });
+  const canvasHandleRef = useRef<CanvasHandle>(null);
   const router = useRouter();
+
+  const handleUndo = useCallback(() => canvasHandleRef.current?.undo(), []);
+  const handleRedo = useCallback(() => canvasHandleRef.current?.redo(), []);
+  const handleHistoryChange = useCallback(
+    (nextCanUndo: boolean, nextCanRedo: boolean) => {
+      setCanUndo(nextCanUndo);
+      setCanRedo(nextCanRedo);
+    },
+    [],
+  );
 
   const activeShapeTool = SHAPE_TOOLS.find((t) => t.id === selectedTool);
 
@@ -298,6 +317,22 @@ export function RoomCanvas({
         e.target instanceof HTMLTextAreaElement
       )
         return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+
       const tool = [...TOOLS, ...SHAPE_TOOLS].find(
         (t) => t.shortcut.toLowerCase() === e.key.toLowerCase() && t.ready,
       );
@@ -305,7 +340,7 @@ export function RoomCanvas({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [handleUndo, handleRedo]);
 
   // Wheel zoom — centered on cursor
   useEffect(() => {
@@ -379,11 +414,40 @@ export function RoomCanvas({
     });
   }, []);
 
-  const handleShare = () => {
+  const copyEditLink = () => {
     navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopied("edit");
+    setShareMenuOpen(false);
+    setTimeout(() => setCopied(null), 2000);
   };
+
+  const copyViewLink = () => {
+    if (!viewToken) return;
+    const url = `${window.location.origin}/view/${viewToken}`;
+    navigator.clipboard.writeText(url);
+    setCopied("view");
+    setShareMenuOpen(false);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  // Close the share popover on outside click / Escape
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (!shareMenuRef.current?.contains(e.target as Node)) {
+        setShareMenuOpen(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShareMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [shareMenuOpen]);
 
   const statusConfig = {
     connecting: { dot: "bg-yellow-400 animate-pulse", label: "Connecting" },
@@ -398,6 +462,7 @@ export function RoomCanvas({
       className="fixed inset-0 overflow-hidden select-none bg-white"
     >
       <Canvas
+        ref={canvasHandleRef}
         roomId={roomId}
         socket={socket}
         selectedTool={selectedTool}
@@ -409,6 +474,7 @@ export function RoomCanvas({
         onPinchAction={handlePinch}
         initialStrokes={initialStrokes}
         onStrokesChange={handleStrokesChange}
+        onHistoryChange={handleHistoryChange}
       />
 
       {selectedTool === "select" && (
@@ -432,23 +498,42 @@ export function RoomCanvas({
         />
       )}
       {/* Top Bar */}
-      <header className="absolute top-3 left-0 right-0 flex items-center justify-between px-3 pointer-events-none z-10 gap-2">
+      <header className="absolute top-3 left-0 right-0 flex items-center justify-between px-2 sm:px-3 pointer-events-none z-10 gap-1 sm:gap-2">
         <button
           onClick={() => router.push("/dashboard")}
-          className="pointer-events-auto flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors flex-shrink-0"
+          className="pointer-events-auto flex items-center gap-1.5 h-9 px-2.5 sm:px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white active:scale-95 transition-all flex-shrink-0"
         >
           <ArrowLeft className="w-4 h-4" />
           <span className="hidden sm:inline">Dashboard</span>
         </button>
 
-        <div className="pointer-events-auto h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center min-w-0">
-          <span className="text-sm font-semibold text-gray-800 max-w-[120px] sm:max-w-[180px] truncate">
+        <div className="pointer-events-auto h-9 px-2.5 sm:px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center min-w-0">
+          <span className="text-sm font-semibold text-gray-800 max-w-[90px] sm:max-w-[180px] truncate">
             {roomSlug}
           </span>
         </div>
 
-        <div className="pointer-events-auto flex items-center gap-2 flex-shrink-0">
-          <div className="h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
+        <div className="pointer-events-auto flex items-center gap-0.5 h-9 px-1 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex-shrink-0">
+          <button
+            onClick={handleUndo}
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:scale-90 rounded-lg transition-all disabled:text-gray-300 disabled:hover:bg-transparent disabled:active:scale-100"
+          >
+            <Undo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleRedo}
+            disabled={!canRedo}
+            title="Redo (Ctrl+Shift+Z)"
+            className="w-7 h-7 flex items-center justify-center text-gray-600 hover:bg-gray-100 active:scale-90 rounded-lg transition-all disabled:text-gray-300 disabled:hover:bg-transparent disabled:active:scale-100"
+          >
+            <Redo2 className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="pointer-events-auto flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          <div className="h-9 px-2 sm:px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 flex items-center gap-2">
             <span
               className={cn(
                 "w-2 h-2 rounded-full flex-shrink-0",
@@ -459,20 +544,50 @@ export function RoomCanvas({
               {statusConfig[status].label}
             </span>
           </div>
-          <button
-            onClick={handleShare}
-            className="flex items-center gap-1.5 h-9 px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white transition-colors"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {copied ? "Copied!" : "Share"}
-            </span>
-          </button>
+          <div ref={shareMenuRef} className="relative">
+            <button
+              onClick={() => setShareMenuOpen((prev) => !prev)}
+              className="flex items-center gap-1.5 h-9 px-2.5 sm:px-3 bg-white/90 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 text-sm font-medium text-gray-700 hover:bg-white active:scale-95 transition-all"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {copied ? "Copied!" : "Share"}
+              </span>
+            </button>
+
+            {shareMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-lg shadow-black/10 border border-gray-200/80 p-1.5 z-20">
+                <button
+                  onClick={copyEditLink}
+                  className="flex flex-col items-start w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-sm font-medium text-gray-800">
+                    {copied === "edit" ? "Copied!" : "Copy edit link"}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    Anyone signed in can draw
+                  </span>
+                </button>
+                <button
+                  onClick={copyViewLink}
+                  disabled={!viewToken}
+                  className="flex flex-col items-start w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+                >
+                  <span className="text-sm font-medium text-gray-800">
+                    {copied === "view" ? "Copied!" : "Copy view-only link"}
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    Read-only, no sign-in required
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
       {/* Style Panel (top-right, below status/share) */}
-      <div className="absolute top-16 right-3 z-10 pointer-events-none">
-        <div className="pointer-events-auto flex flex-col gap-3 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg shadow-black/10 border border-gray-200/80 p-3 w-36">
+      <div className="absolute top-16 right-2 sm:right-3 z-10 pointer-events-none max-h-[calc(100vh-5rem)]">
+        <div className="pointer-events-auto flex flex-col gap-3 bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg shadow-black/10 border border-gray-200/80 p-3 w-32 sm:w-36 max-h-[calc(100vh-5rem)] overflow-y-auto">
           {selectedTool !== "eraser" && (
             <div className="grid grid-cols-4 gap-1">
               {COLORS.map((color) => (
@@ -481,12 +596,15 @@ export function RoomCanvas({
                   onClick={() => setStrokeColor(color)}
                   title={color}
                   className={cn(
-                    "w-6 h-6 rounded-lg flex items-center justify-center transition-all",
+                    "w-6 h-6 rounded-lg flex items-center justify-center transition-all active:scale-90",
                     strokeColor === color ? "bg-gray-100" : "hover:bg-gray-100",
                   )}
                 >
                   <span
-                    className="w-3 h-3 rounded-full"
+                    className={cn(
+                      "rounded-full transition-transform",
+                      strokeColor === color ? "w-3.5 h-3.5" : "w-3 h-3",
+                    )}
                     style={{ backgroundColor: color }}
                   />
                 </button>
@@ -533,7 +651,7 @@ export function RoomCanvas({
                   <button
                     onClick={() => setLineVariant(lv.value)}
                     className={cn(
-                      "w-full h-8 rounded-xl flex items-center justify-center transition-all text-gray-700",
+                      "w-full h-8 rounded-xl flex items-center justify-center transition-all active:scale-90 text-gray-700",
                       lineVariant === lv.value
                         ? "bg-gray-100"
                         : "hover:bg-gray-100",
@@ -567,7 +685,7 @@ export function RoomCanvas({
                       <button
                         onClick={toggleShapesMenu}
                         className={cn(
-                          "w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150",
+                          "w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150 active:scale-90",
                           activeShapeTool || shapesMenuOpen
                             ? "bg-gray-900 text-white shadow-sm scale-105"
                             : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
@@ -615,7 +733,7 @@ export function RoomCanvas({
                                     setShapesMenuOpen(false);
                                   }}
                                   className={cn(
-                                    "w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150",
+                                    "w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all duration-150 active:scale-90",
                                     shapeActive
                                       ? "bg-gray-900 text-white shadow-sm"
                                       : "text-gray-600 hover:bg-gray-100 hover:text-gray-900",
@@ -647,7 +765,7 @@ export function RoomCanvas({
                       isActive
                         ? "bg-gray-900 text-white shadow-sm scale-105"
                         : tool.ready
-                          ? "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                          ? "text-gray-600 hover:bg-gray-100 hover:text-gray-900 active:scale-90"
                           : "text-gray-300 cursor-not-allowed",
                     )}
                   >
@@ -665,12 +783,12 @@ export function RoomCanvas({
           })}
         </div>
       </div>
-      {/* Zoom Controls (bottom-right) */}
-      <div className="absolute bottom-6 right-4 z-10">
+      {/* Zoom Controls (bottom-right; stacked above the toolbar on narrow screens to avoid overlap) */}
+      <div className="absolute bottom-24 right-2 sm:bottom-6 sm:right-4 z-10">
         <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-sm rounded-xl shadow-sm border border-gray-200/80 p-1">
           <button
             onClick={() => applyZoom(0.95)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 active:scale-90 rounded-lg transition-all"
             title="Zoom out"
           >
             <ZoomOut size={13} />
@@ -684,7 +802,7 @@ export function RoomCanvas({
           </button>
           <button
             onClick={() => applyZoom(1.05)}
-            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+            className="w-7 h-7 flex items-center justify-center text-gray-500 hover:bg-gray-100 active:scale-90 rounded-lg transition-all"
             title="Zoom in"
           >
             <ZoomIn size={13} />

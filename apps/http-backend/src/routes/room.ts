@@ -17,7 +17,7 @@ roomRouter.post("/", middleware, async (req: AuthenticatedRequest, res) => {
     const room = await db.room.create({
       data: { slug: parsed.data.name, adminId: userId },
     });
-    res.json({ roomId: room.id });
+    res.json(room);
   } catch (error) {
     res.status(500).json({ message: "Room already exists" });
   }
@@ -101,6 +101,17 @@ roomRouter.put(
     }
   },
 );
+
+roomRouter.get("/view/:viewToken", async (req, res) => {
+  const room = await db.room.findUnique({
+    where: { viewToken: req.params.viewToken },
+  });
+  if (!room) {
+    res.status(404).json({ message: "Room not found" });
+    return;
+  }
+  res.json(room);
+});
 
 roomRouter.get("/:slug", async (req, res) => {
   const room = await db.room.findUnique({

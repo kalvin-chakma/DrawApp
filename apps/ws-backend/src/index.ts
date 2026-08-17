@@ -151,8 +151,32 @@ wss.on("connection", function connection(ws, request) {
               roomId: roomId,
               x: parsedData.x,
               y: parsedData.y,
-              color: parsedData.color || "#ff0000", // Different color for other users
-              lineWidth: parsedData.lineWidth || 2,
+              color: parsedData.color,
+              lineWidth: parsedData.lineWidth,
+              strokeId: parsedData.strokeId,
+              strokeType: parsedData.strokeType,
+              lineVariant: parsedData.lineVariant,
+              userId: userId,
+            })
+          );
+        }
+      });
+      return;
+    }
+
+    // Handle partial-erase events
+    if (parsedData.type === "erase_partial") {
+      const roomId = parsedData.roomId;
+
+      // Broadcast the erasure to all users in the same room except sender
+      users.forEach((user) => {
+        if (user.rooms.includes(roomId) && user.ws !== ws) {
+          user.ws.send(
+            JSON.stringify({
+              type: "erase_partial",
+              roomId: roomId,
+              erasedId: parsedData.erasedId,
+              replacements: parsedData.replacements,
               userId: userId,
             })
           );
